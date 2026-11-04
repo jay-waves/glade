@@ -1,5 +1,7 @@
+import { renderPaths, renderFolders } from './main.jsx';
+import { galleryLayout, galleryRowLayout, galleryBatchSize } from './gallery/gallery-layout.mjs';
+import { resizeGallery } from './gallery/gallery-zoom.mjs';
 import { icon } from './icons.mjs';
-import { layout } from './layout.mjs';
 import { createGalleryPlaybackQueue } from './playback.mjs';
 
 const $ = id => document.getElementById(id);
@@ -50,44 +52,21 @@ function message(text) { $('notice').textContent = text; }
 function list(path, recursive = false, signal) { return request(query('/api/list', path, { recursive: recursive ? '1' : '0', hidden: $('hidden').checked ? '1' : '0' }), signal); }
 
 async function renderTree() {
-  const token = generation;
-  const render = ++treeRender;
-  const fragment = document.createDocumentFragment();
-  async function branch(node, depth, parent) {
-    const row = document.createElement('div');
-    row.className = `tree-row${node.path === current ? ' active' : ''}`;
-    row.style.paddingLeft = `${depth * 14}px`;
-    const toggle = document.createElement('button');
-    toggle.className = 'expand';
-    toggle.append(icon(expanded.has(node.path) ? 'down' : 'right'));
-    toggle.setAttribute('aria-label', `${expanded.has(node.path) ? '折叠' : '展开'} ${node.name}`);
-    toggle.setAttribute('aria-expanded', String(expanded.has(node.path)));
-    toggle.onclick = () => { expanded.has(node.path) ? expanded.delete(node.path) : expanded.add(node.path); renderTree().catch(error => message(error.message)); };
-    const button = document.createElement('button');
-    button.className = 'folder';
-    button.title = node.path || config.root;
-    const visual = document.createElement('span'); visual.className = 'folder-icon'; visual.append(icon('folder'));
-    const label = document.createElement('span'); label.className = 'folder-label'; label.textContent = node.name;
-    button.append(visual, label);
-    if (node.path === current) button.setAttribute('aria-current', 'page');
-    button.onclick = () => navigate(node.path);
-    row.append(toggle, button); parent.append(row);
-    if (!expanded.has(node.path)) return;
+  const token = ++treeRender;
+  async function branch(node) {
+    if (!expanded.has(node.path)) return node;
     if (!treeCache.has(node.path)) treeCache.set(node.path, (await list(node.path)).directories);
-    for (const child of treeCache.get(node.path)) await branch(child, depth + 1, parent);
+    return { ...node, children: await Promise.all(treeCache.get(node.path).map(branch)) };
   }
-  await branch({ name: config.name, path: '' }, 0, fragment);
-  if (token === generation && render === treeRender) $('tree').replaceChildren(fragment);
+  const root = await branch({name:config.name,path:''});
+  if (token !== treeRender) return;
+  renderFolders([root], current, expanded, path => { expanded.has(path) ? expanded.delete(path) : expanded.add(path); renderTree().catch(e=>message(e.message)); }, navigate);
 }
 function breadcrumbs() {
   const items = [{ name: config.name, path: '' }];
   let accumulated = '';
   for (const name of current.split('/').filter(Boolean)) { accumulated += `${accumulated ? '/' : ''}${name}`; items.push({ name, path: accumulated }); }
-  $('breadcrumbs').replaceChildren();
-  for (const [index, item] of items.entries()) {
-    if (index) { const separator = document.createElement('span'); separator.className = 'separator'; separator.textContent = '/'; $('breadcrumbs').append(separator); }
-    const button = document.createElement('button'); button.textContent = item.name; if (index === items.length - 1) button.setAttribute('aria-current', 'page'); button.onclick = () => navigate(item.path); $('breadcrumbs').append(button);
-  }
+  renderPaths(items, navigate);
 }
 function navigate(path) {
   if (narrow.matches) setTreeHidden(true);
@@ -112,7 +91,7 @@ async function load(path) {
   if ($('viewer').open) $('viewer').close();
   for (const card of cards) card.cleanup();
   cards = []; shown = 0; media = []; gallery.replaceChildren(); gallery.style.height = '0px';
-  $('empty').hidden = false; $('empty').textContent = '正在读取文件夹…'; $('more').hidden = true; $('count').textContent = '';
+  $('empty').hidden = false; $('empty').textContent = 'Loading folder…'; $('more').hidden = true; $('count').textContent = '';
   let prefix = ''; expanded.add('');
   for (const part of current.split('/').filter(Boolean)) { prefix += `${prefix ? '/' : ''}${part}`; expanded.add(prefix); }
   breadcrumbs(); message('');
@@ -124,7 +103,7 @@ async function load(path) {
     await renderTree();
     if (token !== generation) return;
     if ($('sort').value.startsWith('taken-')) {
-      message('正在读取拍摄时间…');
+      message('Reading capture dates…');
       let cursor = 0;
       await Promise.all(Array.from({ length: 4 }, async () => {
         while (cursor < media.length && token === generation) {
@@ -136,11 +115,11 @@ async function load(path) {
     if (token !== generation) return;
     sortMedia();
     const notices = [...result.warnings];
-    if ($('sort').value.startsWith('taken-')) notices.push('没有可读取拍摄时间的文件按修改时间排序。');
+    if ($('sort').value.startsWith('taken-')) notices.push('Files without capture dates are sorted by modification time.');
     message(notices.join(' · '));
-    $('count').textContent = `${media.length.toLocaleString()} 个媒体`;
+    $('count').textContent = `${media.length.toLocaleString()} items`;
     $('empty').hidden = media.length > 0;
-    $('empty').textContent = '这个文件夹还没有可浏览的媒体。\n试试其他文件夹，或开启「包含子目录」。';
+    $('empty').textContent = 'No media in this folder.\nTry another folder or enable “Include subdirectories”.';
     viewport.scrollTop = 0;
     addBatch();
     const savedScroll = scrollPositions.get(current) ?? 0;
@@ -150,13 +129,13 @@ async function load(path) {
     restoring = false;
   } catch (error) {
     if (error.name === 'AbortError' || token !== generation) return;
-    $('empty').hidden = false; $('empty').textContent = `无法打开文件夹：${error.message}`; message('');
+    $('empty').hidden = false; $('empty').textContent = `Unable to open folder: ${error.message}`; message('');
   }
 }
 let layoutFrame;
 function scheduleLayout() { if (!layoutFrame) layoutFrame = requestAnimationFrame(() => { layoutFrame = undefined; placeCards(); }); }
 function placeCards() {
-  const result = layout(cards.map(card => card.ratio), gallery.clientWidth, Number($('size').value), settings.rows);
+  const result = (settings.rows ? galleryRowLayout : galleryLayout)(cards.map(card => card.ratio), gallery.clientWidth, Number($('size').value));
   result.items.forEach((item, index) => Object.assign(cards[index].element.style, { left: `${item.left}px`, top: `${item.top}px`, width: `${item.width}px`, height: `${item.height}px` }));
   gallery.style.height = `${result.height}px`;
 }
@@ -167,7 +146,7 @@ const observer = new IntersectionObserver(entries => {
   }
 }, { root: viewport, rootMargin: '100px' });
 function makeCard(item, index) {
-  const element = document.createElement('button'); element.className = 'card'; element.setAttribute('aria-label', `打开 ${item.name}`);
+  const element = document.createElement('button'); element.className = 'card gallery-card'; element.setAttribute('aria-label', `Open ${item.name}`);
   const img = document.createElement('img'); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
   const fallback = document.createElement('span'); fallback.className = 'fallback'; fallback.textContent = item.name; fallback.hidden = true;
   element.append(img, fallback);
@@ -184,7 +163,7 @@ function makeCard(item, index) {
   };
   let video;
   if (item.kind === 'video' || item.liveVideo) {
-    const badge = document.createElement('span'); badge.className = 'badge'; badge.append(icon(item.liveVideo ? 'live' : 'play')); badge.title = item.liveVideo ? 'Live Photo' : '视频'; badge.setAttribute('aria-label', badge.title); element.append(badge);
+    const badge = document.createElement('span'); badge.className = 'badge'; badge.append(icon(item.liveVideo ? 'live' : 'play')); badge.title = item.liveVideo ? 'Live Photo' : 'Video'; badge.setAttribute('aria-label', badge.title); element.append(badge);
     video = document.createElement('video'); video.muted = true; video.loop = true; video.playsInline = true; video.preload = 'none'; element.insertBefore(video, caption);
     video.addEventListener('playing', () => { video.classList.add('playing'); state.cancel?.markPlaying(); });
     video.addEventListener('loadedmetadata', () => { if (!item.liveVideo && video.videoWidth) { state.ratio = video.videoWidth / video.videoHeight; scheduleLayout(); } });
@@ -210,7 +189,7 @@ function makeCard(item, index) {
   return state;
 }
 function addBatch() {
-  const end = Math.min(media.length, shown + 60);
+  const end = Math.min(media.length, shown + galleryBatchSize);
   for (; shown < end; shown++) { const card = makeCard(media[shown], shown); cards.push(card); gallery.append(card.element); }
   placeCards(); $('more').hidden = shown >= media.length;
 }
@@ -227,7 +206,7 @@ function updateLayoutButtons() { $('masonry').setAttribute('aria-pressed', Strin
 for (const name of ['masonry', 'rows']) $(name).onclick = () => { settings.rows = name === 'rows'; updateLayoutButtons(); save(); placeCards(); };
 $('size').oninput = () => { save(); placeCards(); };
 for (const [id, direction] of [['smaller', -1], ['larger', 1]]) $(id).onclick = () => {
-  $('size').value = Math.max(120, Math.min(440, Number($('size').value) + direction * 20));
+  $('size').value = resizeGallery(Number($('size').value), direction, false, gallery.clientWidth, settings.rows, cards.map(card => card.ratio));
   $('size').oninput();
 };
 for (const menu of document.querySelectorAll('details.options')) {
@@ -267,7 +246,7 @@ resizer.onpointerdown = event => {
 };
 resizer.onpointermove = event => {
   if (!resizer.hasPointerCapture(event.pointerId)) return;
-  settings.sidebarWidth = Math.max(180, Math.min(480, event.clientX - 49));
+  settings.sidebarWidth = Math.max(180, Math.min(480, event.clientX));
   setSidebarWidth(settings.sidebarWidth);
 };
 resizer.onlostpointercapture = () => { document.body.classList.remove('resizing'); save(); };
@@ -301,9 +280,9 @@ function openViewer(index) {
   element.onerror = () => {
     if (item.kind === 'image' && !item.liveVideo && element.dataset.fallback !== '1') {
       element.dataset.fallback = '1'; element.src = previewUrl(item);
-      const note = document.createElement('p'); note.textContent = '浏览器不支持原图格式，正在显示转换后的预览。'; $('viewer-content').append(note); return;
+      const note = document.createElement('p'); note.textContent = 'This image format is not supported by your browser. Showing a converted preview.'; $('viewer-content').append(note); return;
     }
-    const note = document.createElement('p'); note.textContent = '浏览器无法播放或显示此格式，可通过右上角打开原文件。'; $('viewer-content').append(note);
+    const note = document.createElement('p'); note.textContent = 'Your browser cannot display this format. Use Open original to open the file.'; $('viewer-content').append(note);
   };
   $('viewer-content').append(element);
   if (!$('viewer').open) $('viewer').showModal();

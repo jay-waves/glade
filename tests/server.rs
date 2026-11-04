@@ -127,28 +127,23 @@ async fn directory_listing_streaming_and_embedded_assets() {
             .unwrap()
             .contains("frame-ancestors 'none'")
     );
-    assert!(
-        String::from_utf8(
-            to_bytes(response.into_body(), usize::MAX)
-                .await
-                .unwrap()
-                .to_vec()
-        )
-        .unwrap()
-        .contains("媒体画廊")
-    );
-    for asset in [
-        "/app.mjs",
-        "/icons.mjs",
-        "/style.css",
-        "/layout.mjs",
-        "/playback.mjs",
-        "/fonts/MonaSansVF.woff2",
-        "/fonts/OFL.txt",
-    ] {
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("lang=\"en\""));
+    let assets: Vec<_> = html
+        .split('"')
+        .filter(|value| value.starts_with("/assets/"))
+        .collect();
+    assert!(!assets.is_empty());
+    for asset in assets {
         let response = request(&app, asset, &[]).await;
         assert_eq!(response.status(), StatusCode::OK);
-        if asset.ends_with("mjs") {
+        if asset.ends_with("js") {
             assert!(
                 response.headers()["content-type"]
                     .to_str()

@@ -22,7 +22,7 @@ use tower::ServiceExt;
 use tower_http::services::ServeFile;
 
 #[derive(RustEmbed)]
-#[folder = "web/"]
+#[folder = "dist/"]
 struct Assets;
 
 pub struct AppState {

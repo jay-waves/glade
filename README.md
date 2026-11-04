@@ -19,7 +19,7 @@ FFmpeg is a separate dependency and is not bundled with glade. Supported formats
 
 Glade opens your browser and listens only on `127.0.0.1`. Without a directory argument it uses the current directory. Press Ctrl+C to stop. Use `--help` for all options.
 
-The interface follows the reduced lib.ts gallery layout: a 49px navigation rail, resizable folder tree, centered content panel, compact sticky toolbar, Mona Sans typography, and automatic light/dark themes. On narrow screens the tree opens as a dismissible drawer. Git, document rendering, search, and bookmark panels are omitted.
+The interface follows the reduced lib.ts gallery layout: a resizable folder tree, centered content panel, compact sticky toolbar, Mona Sans typography, and automatic light/dark themes. On narrow screens the tree opens as a dismissible drawer. Git, document rendering, search, and bookmark panels are omitted.
 
 Browse images and videos, include subdirectories, sort and resize cards, preview videos, and open a full-size viewer. Use the toolbar’s size buttons and sort menu; the three-dot menu contains layout, thumbnail size, subdirectory, autoplay, and hidden-file settings. Folder tree width and desktop visibility are remembered. Matching JPEG / HEIC / HEIF and MOV files in the same folder are grouped as Live Photos. Symbolic links are excluded. Refresh the tree to pick up file changes.
 
@@ -27,9 +27,11 @@ Thumbnails and metadata are cached in `%LOCALAPPDATA%\glade\cache` on Windows, `
 
 ## Build and test
 
-Install Rust and, on Windows, the MSVC C++ build tools. The build and default tests do not require FFmpeg.
+Install Node.js 22+, Rust and, on Windows, the MSVC C++ build tools. The build and default tests do not require FFmpeg.
 
 ```sh
+npm ci
+npm run build
 cargo build --release --locked
 cargo test --release --locked
 cargo clippy --release --locked --all-targets -- -D warnings
@@ -55,3 +57,7 @@ Frontend files are embedded in the binary, so changes under `web/` require rebui
 ## License
 
 MIT. The interface styling, playback queue, and masonry layout strategy are adapted from lib.ts; glade builds and runs independently. Mona Sans is embedded under the SIL Open Font License (see `web/fonts/OFL.txt`).
+
+## Frontend
+
+The English-only frontend uses React, Primer, Octicons and Tailwind. PathBar, FileToolbar, theme styles, gallery layout and zoom modules are migrated from lib.ts. The ribbon is omitted. Glade's media adapter handles its own Rust API and playback queue. Run `npm run build` before Cargo commands; Vite writes `dist/`, which Rust embeds in the executable. Windows CI performs both builds. Node.js is needed only at build time.
