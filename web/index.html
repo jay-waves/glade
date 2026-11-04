@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>glade</title><link rel="stylesheet" href="/style.css"></head>
+<body>
+  <aside id="sidebar">
+    <a class="brand" href="#"><span class="brand-icon">g</span>glade<span class="tagline">LOCAL GALLERY</span></a>
+    <div class="tree-heading">文件夹 <button id="refresh" title="刷新目录和媒体" aria-label="刷新目录和媒体">↻</button></div>
+    <nav id="tree" aria-label="目录树"></nav>
+    <footer><span class="status-dot"></span> 本地浏览 · 文件保持原样</footer>
+  </aside>
+  <main>
+    <header><button id="toggle-tree" aria-label="显示或隐藏目录树" aria-expanded="true">☰</button><div id="breadcrumbs" aria-label="当前位置"></div><span id="count"></span></header>
+    <section class="toolbar" aria-label="画廊设置">
+      <div class="segmented"><button id="masonry" aria-pressed="true">瀑布流</button><button id="rows" aria-pressed="false">等高行</button></div>
+      <label class="size-label">大小 <input id="size" type="range" min="120" max="440" step="20" value="220" aria-label="卡片大小"></label>
+      <select id="sort" aria-label="排序"><option value="name-asc">名称 A–Z</option><option value="name-desc">名称 Z–A</option><option value="time-desc">修改时间：最新</option><option value="time-asc">修改时间：最早</option><option value="taken-desc">拍摄时间：最新</option><option value="taken-asc">拍摄时间：最早</option></select>
+      <label><input id="recursive" type="checkbox">包含子目录</label>
+      <details class="options"><summary>更多</summary><div><label><input id="autoplay" type="checkbox">自动播放视频</label><label><input id="hidden" type="checkbox">显示隐藏文件</label></div></details>
+    </section>
+    <div id="notice" role="status"></div>
+    <div id="viewport"><div id="gallery" aria-label="媒体画廊"></div><div id="empty" hidden></div><button id="more" hidden>加载更多</button><div id="sentinel"></div></div>
+  </main>
+  <dialog id="viewer" aria-label="媒体预览"><div class="viewer-toolbar"><span id="viewer-name"></span><a id="original" target="_blank" rel="noopener">打开原文件 ↗</a><button id="close" aria-label="关闭预览">✕</button></div><button id="previous" class="viewer-nav" aria-label="上一个">‹</button><div id="viewer-content"></div><button id="next" class="viewer-nav" aria-label="下一个">›</button><div id="viewer-position"></div></dialog>
+  <script type="module" src="/app.mjs"></script>
+</body></html>
