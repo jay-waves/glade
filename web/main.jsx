@@ -38,7 +38,7 @@ function GalleryMenus() {
   </>;
 }
 // Keep the controls mounted: the media adapter owns persisted state and playback.
-function App(){useEffect(()=>{import('./app.mjs').catch(error=>{document.getElementById('notice').textContent=error.message;});},[]);return <ThemeProvider colorMode="auto" dayScheme="light" nightScheme="dark"><BaseStyles>
+function App(){useEffect(()=>{import('./app.mjs').catch(error=>{document.getElementById('notice').textContent=error.message;});},[]);return <ThemeProvider colorMode="auto" dayScheme="light" nightScheme="dark"><BaseStyles className="app-shell">
 <button id="drawer-backdrop" aria-label="Close folders" tabIndex={-1}/>
 <aside id="sidebar" className="sidebar"><div className="tree-heading"><strong>Folders</strong>{button('refresh',SyncIcon,'Refresh folders')}</div><nav id="tree" aria-label="Folders"/><footer><span id="root-name">glade</span></footer></aside>
 <div id="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize folders" aria-valuemin={180} aria-valuemax={480} aria-valuenow={245} tabIndex={0}/>
