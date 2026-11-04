@@ -17,7 +17,7 @@ if (!settings || typeof settings !== 'object') settings = {};
 let current = '', media = [], shown = 0, cards = [], generation = 0, aborter, frame, viewerIndex = -1;
 let scrollPositions = new Map(), restoring = false;
 const expanded = new Set(['']), treeCache = new Map(), dimensions = new Map();
-let treeRender = 0;
+let treeRender = 0, fileSelection = 0;
 const queue = createGalleryPlaybackQueue(8);
 const gallery = $('gallery'), viewport = $('viewport');
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
@@ -29,11 +29,7 @@ for (const id of controls) {
 }
 settings.rows = settings.rows === true;
 updateLayoutButtons();
-const narrow = matchMedia('(max-width:960px)');
-if (narrow.matches || settings.treeHidden) document.body.classList.add('tree-hidden');
-const initialWidth = Math.max(180, Math.min(480, Number(settings.sidebarWidth) || 245));
-setSidebarWidth(initialWidth);
-$('toggle-tree').setAttribute('aria-expanded', String(!document.body.classList.contains('tree-hidden')));
+setTreeHidden(true);
 
 async function request(url, signal) {
   const response = await fetch(url, { signal });
@@ -54,13 +50,29 @@ function list(path, recursive = false, signal) { return request(query('/api/list
 async function renderTree() {
   const token = ++treeRender;
   async function branch(node) {
-    if (!expanded.has(node.path)) return node;
-    if (!treeCache.has(node.path)) treeCache.set(node.path, (await list(node.path)).directories);
-    return { ...node, children: await Promise.all(treeCache.get(node.path).map(branch)) };
+    if (node.kind || !expanded.has(node.path)) return node;
+    if (!treeCache.has(node.path)) {
+      const listing = await list(node.path);
+      if (token !== treeRender) return node;
+      treeCache.set(node.path, listing);
+    }
+    return { ...node, children: await Promise.all([...treeCache.get(node.path).directories, ...treeCache.get(node.path).media].map(branch)) };
   }
   const root = await branch({name:config.name,path:''});
   if (token !== treeRender) return;
-  renderFolders([root], current, expanded, path => { expanded.has(path) ? expanded.delete(path) : expanded.add(path); renderTree().catch(e=>message(e.message)); }, navigate);
+  renderFolders([root], $('viewer').open ? media[viewerIndex]?.path : current, expanded, (path,value) => { value ? expanded.add(path) : expanded.delete(path); renderTree().catch(e=>message(e.message)); }, navigate, openTreeFile);
+}
+async function openTreeFile(item) {
+  const selection = ++fileSelection;
+  const parent = item.path.includes('/') ? item.path.slice(0, item.path.lastIndexOf('/')) : '';
+  setTreeHidden(true);
+  if (current !== parent || !media.some(entry => entry.path === item.path)) {
+    history.replaceState(null, '', `#${encodeURIComponent(parent)}`);
+    if (!await load(parent)) return;
+  }
+  if (selection !== fileSelection || current !== parent) return;
+  const index = media.findIndex(entry => entry.path === item.path);
+  if (index >= 0) { openViewer(index); renderTree().catch(error => message(error.message)); }
 }
 function breadcrumbs() {
   const items = [{ name: config.name, path: '' }];
@@ -69,7 +81,8 @@ function breadcrumbs() {
   renderPaths(items, navigate);
 }
 function navigate(path) {
-  if (narrow.matches) setTreeHidden(true);
+  ++fileSelection;
+  setTreeHidden(true);
   const hash = `#${encodeURIComponent(path)}`;
   if (location.hash === hash || (!path && !location.hash)) load(path);
   else location.hash = hash;
@@ -98,9 +111,9 @@ async function load(path) {
   try {
     const result = await list(current, $('recursive').checked, signal);
     if (token !== generation) return;
-    treeCache.set(current, result.directories);
+    if (!$('recursive').checked) treeCache.set(current, result);
     media = result.media;
-    await renderTree();
+    renderTree().catch(error => { if (token === generation) message(`File browser: ${error.message}`); });
     if (token !== generation) return;
     if ($('sort').value.startsWith('taken-')) {
       message('Reading capture dates…');
@@ -127,6 +140,7 @@ async function load(path) {
     while (shown < media.length && gallery.offsetHeight < savedScroll + viewport.clientHeight) addBatch();
     viewport.scrollTop = savedScroll;
     restoring = false;
+    return true;
   } catch (error) {
     if (error.name === 'AbortError' || token !== generation) return;
     $('empty').hidden = false; $('empty').textContent = `Unable to open folder: ${error.message}`; message('');
@@ -221,52 +235,37 @@ document.addEventListener('keydown', event => {
   if (event.key !== 'Escape' || $('viewer').open) return;
   const menu = document.querySelector('details.options[open]');
   if (menu) { menu.open = false; menu.querySelector('summary').focus(); }
-  else if (narrow.matches) setTreeHidden(true);
+  else setTreeHidden(true);
 });
-for (const id of ['recursive', 'hidden', 'sort']) $(id).onchange = () => { save(); if (id === 'hidden') treeCache.clear(); load(current); };
+for (const id of ['recursive', 'hidden', 'sort']) $(id).onchange = () => { ++fileSelection; ++treeRender; save(); if (id === 'hidden') treeCache.clear(); load(current); };
 $('autoplay').onchange = () => { save(); for (const card of cards) card.updatePlayback(); };
-$('refresh').onclick = () => { treeCache.clear(); dimensions.clear(); load(current); };
+$('refresh').onclick = () => { ++fileSelection; ++treeRender; treeCache.clear(); dimensions.clear(); load(current); };
 function setTreeHidden(hidden) {
+  const restoreFocus = hidden && $('sidebar').contains(document.activeElement);
   document.body.classList.toggle('tree-hidden', hidden);
+  $('sidebar').hidden = hidden;
+  $('drawer-backdrop').hidden = hidden;
   $('toggle-tree').setAttribute('aria-expanded', String(!hidden));
-  if (!narrow.matches) { settings.treeHidden = hidden; save(); }
+  $('viewport').inert = !hidden;
+  if (restoreFocus) $('toggle-tree').focus();
 }
-$('toggle-tree').onclick = () => setTreeHidden(!document.body.classList.contains('tree-hidden'));
-$('drawer-backdrop').onclick = () => setTreeHidden(true);
-narrow.addEventListener('change', () => setTreeHidden(narrow.matches || Boolean(settings.treeHidden)));
-function setSidebarWidth(width) {
-  document.body.style.setProperty('--sidebar-width', `${width}px`);
-  $('sidebar-resize').setAttribute('aria-valuenow', String(Math.round(width)));
-}
-const resizer = $('sidebar-resize');
-resizer.onpointerdown = event => {
-  if (event.button !== 0) return;
-  event.preventDefault(); resizer.setPointerCapture(event.pointerId);
-  document.body.classList.add('resizing');
+$('toggle-tree').onclick = () => {
+  const hidden = !$('sidebar').hidden;
+  setTreeHidden(hidden);
+  if (!hidden) { $('close-tree').focus(); renderTree().catch(error => message(`File browser: ${error.message}`)); }
 };
-resizer.onpointermove = event => {
-  if (!resizer.hasPointerCapture(event.pointerId)) return;
-  settings.sidebarWidth = Math.max(180, Math.min(480, event.clientX));
-  setSidebarWidth(settings.sidebarWidth);
-};
-resizer.onlostpointercapture = () => { document.body.classList.remove('resizing'); save(); };
-resizer.onpointerup = event => {
-  if (resizer.hasPointerCapture(event.pointerId)) resizer.releasePointerCapture(event.pointerId);
-};
-resizer.onkeydown = event => {
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-  event.preventDefault();
-  const value = Number(resizer.getAttribute('aria-valuenow'));
-  settings.sidebarWidth = event.key === 'Home' ? 180 : event.key === 'End' ? 480 : Math.max(180, Math.min(480, value + (event.key === 'ArrowRight' ? 10 : -10)));
-  setSidebarWidth(settings.sidebarWidth); save();
-};
+$('close-tree').onclick = $('drawer-backdrop').onclick = () => setTreeHidden(true);
 document.addEventListener('visibilitychange', () => { for (const card of cards) card.updatePlayback(); });
 function clearViewer() { for (const video of $('viewer-content').querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); } $('viewer-content').replaceChildren(); }
 function openViewer(index) {
   if (index < 0 || index >= media.length) return;
   viewerIndex = index; clearViewer();
   const item = media[index];
-  $('viewer-name').textContent = item.path;
+  $('viewer-content').classList.remove('actual-size');
+  $('viewer-name').textContent = item.name;
+  $('viewer-name').title = item.path;
+  $('viewer-details').textContent = `${item.kind === 'video' ? 'Video' : 'Image'} · ${new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(item.size / 1024 / 1024)} MB · ${item.path}`;
+  $('actual-view').disabled = $('fit-view').disabled = item.kind === 'video' || Boolean(item.liveVideo);
   $('original').href = mediaUrl(item.path);
   $('viewer-position').textContent = `${index + 1} / ${media.length}`;
   $('previous').disabled = index === 0; $('next').disabled = index === media.length - 1;
@@ -278,6 +277,7 @@ function openViewer(index) {
     else element.poster = previewUrl(item);
   } else { element = document.createElement('img'); element.alt = item.name; element.src = mediaUrl(item.path); }
   element.onerror = () => {
+    if (!element.isConnected) return;
     if (item.kind === 'image' && !item.liveVideo && element.dataset.fallback !== '1') {
       element.dataset.fallback = '1'; element.src = previewUrl(item);
       const note = document.createElement('p'); note.textContent = 'This image format is not supported by your browser. Showing a converted preview.'; $('viewer-content').append(note); return;
@@ -288,15 +288,23 @@ function openViewer(index) {
   if (!$('viewer').open) $('viewer').showModal();
   for (const card of cards) card.updatePlayback();
 }
+$('actual-view').onclick = () => { $('viewer-content').classList.add('actual-size'); $('viewer-content').focus(); };
+$('fit-view').onclick = () => $('viewer-content').classList.remove('actual-size');
+$('viewer-content').ondblclick = event => { if (event.target.tagName === 'IMG') { $('viewer-content').classList.toggle('actual-size'); $('viewer-content').focus(); } };
 $('close').onclick = () => $('viewer').close();
-$('viewer').onclose = () => { clearViewer(); for (const card of cards) card.updatePlayback(); };
+$('viewer').onclose = () => {
+  if ($('viewer').open) return;
+  clearViewer();
+  for (const card of cards) card.updatePlayback();
+  renderTree().catch(error => message(error.message));
+};
 $('previous').onclick = () => openViewer(viewerIndex - 1);
 $('next').onclick = () => openViewer(viewerIndex + 1);
 $('viewer').addEventListener('keydown', event => {
-  if (event.target.tagName === 'VIDEO') return;
+  if (event.target.tagName === 'VIDEO' || $('viewer-content').classList.contains('actual-size')) return;
   if (['ArrowLeft', 'ArrowUp'].includes(event.key)) { event.preventDefault(); openViewer(viewerIndex - 1); }
   if (['ArrowRight', 'ArrowDown'].includes(event.key)) { event.preventDefault(); openViewer(viewerIndex + 1); }
 });
-function loadHash() { try { load(decodeURIComponent(location.hash.slice(1))); } catch { navigate(''); } }
+function loadHash() { ++fileSelection; try { load(decodeURIComponent(location.hash.slice(1))); } catch { navigate(''); } }
 window.addEventListener('hashchange', loadHash);
 loadHash();

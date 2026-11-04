@@ -25,7 +25,7 @@ export function PathBar({ items, onNavigate, disabled = false }: {
             if (event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
             event.preventDefault(); navigate();
           }}>{item.label}</Breadcrumbs.Item>
-          : <Breadcrumbs.Item key={key} as="button" type="button" aria-label={item.path} disabled={disabled} selected={selected}
+          : <Breadcrumbs.Item key={key} as="button" type="button" aria-label={item.path || undefined} disabled={disabled} selected={selected}
             className="ui-focus cursor-pointer border-0 bg-transparent p-0 font-ui" onClick={navigate}>{item.label}</Breadcrumbs.Item>;
       })}
     </Breadcrumbs>
