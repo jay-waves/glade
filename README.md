@@ -27,12 +27,18 @@ Thumbnails and metadata are cached in `%LOCALAPPDATA%\glade\cache` on Windows, `
 
 ## Build and test
 
-Install Rust and, on Windows, the MSVC C++ build tools. FFmpeg and FFprobe are required for tests.
+Install Rust and, on Windows, the MSVC C++ build tools. The build and default tests do not require FFmpeg.
 
 ```sh
 cargo build --release --locked
 cargo test --release --locked
 cargo clippy --release --locked --all-targets -- -D warnings
+```
+
+The FFmpeg integration test checks real thumbnail generation, metadata and cache invalidation. Run it separately with FFmpeg and FFprobe on your PATH:
+
+```sh
+cargo test --release --locked --features ffmpeg-tests --test ffmpeg
 ```
 
 The Windows binary is `target/release/glade.exe`. No Node.js or external frontend assets are required at runtime. Optional frontend checks require Node.js:
@@ -42,7 +48,9 @@ npm run check
 npm test
 ```
 
-GitHub Actions builds and tests Windows on pushes, pull requests and manual runs. A tag push also creates a GitHub Release with `glade.exe` and generated release notes. Tags pushed before the workflow was added are not published automatically.
+GitHub Actions builds and runs the default tests on Windows without FFmpeg, using a Rust dependency cache. Documentation-only changes skip the build; tag pushes always build and create a GitHub Release with `glade.exe` and generated release notes. The FFmpeg integration test is not run in CI. Tags pushed before the workflow was added are not published automatically.
+
+Frontend files are embedded in the binary, so changes under `web/` require rebuilding and linking glade, though unchanged Rust dependencies can be reused from the cache.
 
 ## License
 
