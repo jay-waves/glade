@@ -153,3 +153,42 @@ async fn directory_listing_streaming_and_embedded_assets() {
         }
     }
 }
+
+#[tokio::test]
+async fn markdown_is_listed_and_served_without_media_processing() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().join("docs");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("README.MD"), "# Hello\n\n中文").unwrap();
+    fs::write(temp.path().join("private.md"), "private").unwrap();
+    let app = router(Arc::new(AppState::new(
+        dunce::canonicalize(root).unwrap(),
+        temp.path().join("cache"),
+        49192,
+    )));
+    let list = json(&app, "/api/list").await;
+    assert_eq!(list["media"][0]["kind"], "markdown");
+    let response = request(&app, "/media?path=README.MD", &[]).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(response.into_body(), 1024).await.unwrap(),
+        "# Hello\n\n中文"
+    );
+    assert_eq!(
+        json(&app, "/api/metadata?path=README.MD").await,
+        serde_json::json!({})
+    );
+    assert_eq!(
+        request(&app, "/thumbnail?path=README.MD", &[])
+            .await
+            .status(),
+        StatusCode::UNSUPPORTED_MEDIA_TYPE
+    );
+    assert_eq!(
+        request(&app, "/media?path=..%2Fprivate.md", &[])
+            .await
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert!(!temp.path().join("cache").exists());
+}

@@ -1,0 +1,135 @@
+/* Prose theme adapted from cmrak/web/markdown/theme.css and style.css.
+   Keep document typography and palette scoped to the Markdown reader. */
+@font-face {
+  font-family: 'Monaspace Neon';
+  src: url('./fonts/MonaspaceNeonVar.woff') format('woff');
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+}
+.markdown-viewer {
+  --md-font-serif: Georgia, 'Source Han Serif SC', 'Source Han Serif CN VF', 'Source Han Serif', 'Source Han Serif CN', 'Noto Serif CJK SC', 'Songti SC', SimSun, 'Libertinus Serif', 'New Computer Modern', 'Times New Roman', serif;
+  --md-font-mono: 'Monaspace Neon', Consolas, Menlo, SFMono-Regular, 'Source Han Sans CN VF', 'Source Han Sans', 'Source Han Sans CN', 'Source Han Sans SC', ui-monospace, monospace;
+  --md-fg: light-dark(#363733, #f0f6fc);
+  --md-bg: light-dark(#fdfdfc, #212830);
+  --md-muted: light-dark(#73746e, #9198a1);
+  --md-border: light-dark(#dfe1df, #3d444d);
+  --md-border-muted: light-dark(#e9ebe9, #3d444db3);
+  --md-accent: light-dark(#777c78, #478be6);
+  --md-code-bg: light-dark(#e9ecea, #656c7633);
+  --md-code-fg: light-dark(#363733, #c9d1d9);
+  --md-pre-bg: light-dark(#f4f5f4, #262c36);
+}
+
+#viewer-content.markdown-content {
+  display:block;
+  background:var(--md-bg);
+  color:var(--md-fg);
+  padding:32px 2.5% 110px;
+  -webkit-text-size-adjust:100%;
+}
+.markdown-body {
+  max-width:920px;
+  min-width:0;
+  margin:0 auto;
+  font:400 17px/1.75 var(--md-font-serif);
+  overflow-wrap:break-word;
+}
+/* cmrak uses a 16px rem; use explicit spacing here because Glade's root is 14px. */
+.markdown-body :is(p,blockquote,ul,ol,table,pre) {margin:0 0 16px}
+#viewer-content .markdown-body p {margin:0 0 16px;padding:0;color:inherit;text-align:start}
+.markdown-body :is(h1,h2,h3,h4,h5,h6) {
+  font-family:var(--md-font-serif);
+  font-weight:600;
+  line-height:1.25;
+  margin:24px 0 16px;
+  scroll-margin-top:24px;
+}
+.markdown-body :is(h1,h2) {padding-bottom:.3em;border-bottom:1px solid var(--md-border-muted)}
+.markdown-body h1 {font-size:1.6em}
+.markdown-body h2 {font-size:1.25em}
+.markdown-body h3 {font-size:1.1em}
+.markdown-body :is(h4,h5,h6) {font-size:1em}
+.markdown-body h6 {color:var(--md-muted)}
+.markdown-body strong {font-weight:700}
+.markdown-body a {
+  color:inherit;
+  text-decoration:underline;
+  text-decoration-color:color-mix(in srgb,currentColor 60%,transparent);
+  text-decoration-thickness:1px;
+  text-underline-offset:.12em;
+  overflow-wrap:anywhere;
+}
+.markdown-body a:focus-visible {outline:2px solid var(--md-accent);outline-offset:0}
+.markdown-body :is(ul,ol) {padding-inline:32px 0;list-style:revert;list-style-position:outside}
+.markdown-body :is(ul,ol) :is(ul,ol) {margin-top:0;margin-bottom:0}
+.markdown-body :is(ol ol,ul ol) {list-style-type:lower-roman}
+.markdown-body :is(ul ul ol,ul ol ol,ol ul ol,ol ol ol) {list-style-type:lower-alpha}
+.markdown-body li + li {margin-top:.25em}
+#viewer-content .markdown-body li > p {margin-top:16px}
+.markdown-body blockquote {
+  padding:3.2px 0 3.2px 30px;
+  border-left:2px solid var(--md-border-muted);
+  color:var(--md-muted);
+}
+#viewer-content .markdown-body blockquote > :last-child {margin-bottom:0}
+.markdown-body :is(pre,code) {
+  font-family:var(--md-font-mono);
+  font-size:13px;
+  font-weight:400;
+  font-synthesis-weight:none;
+}
+.markdown-body code {
+  padding:0 .4em;
+  border-radius:6px;
+  color:var(--md-code-fg);
+  background:var(--md-code-bg);
+  white-space:break-spaces;
+}
+.markdown-body :not(pre) > code {vertical-align:.1em}
+.markdown-body :is(h1,h2,h3,h4,h5,h6) code {padding:0 .2em;font-size:inherit}
+.markdown-body pre {
+  padding:16px;
+  overflow:auto;
+  line-height:1.45;
+  border-radius:6px;
+  background:color-mix(in srgb,var(--md-bg) 98%,var(--md-muted));
+  border:1px solid color-mix(in srgb,var(--md-border) 78%,transparent);
+  overflow-wrap:normal;
+}
+.markdown-body pre code {padding:0;margin:0;white-space:pre;word-break:normal;line-height:inherit;background:transparent;border:0}
+#viewer-content .markdown-body img {
+  display:inline;
+  max-width:100%;
+  height:auto;
+  margin:0;
+  border:0;
+  border-radius:8px;
+  vertical-align:baseline;
+}
+.markdown-body table {
+  display:block;
+  width:max-content;
+  max-width:100%;
+  overflow:auto;
+  border-spacing:0;
+  border-collapse:collapse;
+  font-size:14px;
+  font-variant-numeric:tabular-nums;
+  text-align:left;
+}
+.markdown-body :is(th,td) {padding:8px 20px;border:0;border-top:1px solid var(--md-border-muted)}
+.markdown-body th {font-weight:600;text-align:left}
+.markdown-body tr {background:var(--md-bg);border-top:1px solid var(--md-border-muted)}
+.markdown-body tr:nth-child(2n) {background:var(--md-pre-bg)}
+.markdown-body tr:last-child :is(td,th) {border-bottom:1px solid var(--md-border-muted)}
+.markdown-body hr {height:.25em;padding:0;border:0;background:var(--md-border);margin:24px 0}
+#viewer-content .markdown-body > :first-child {margin-top:0}
+#viewer-content .markdown-body > :last-child {margin-bottom:0}
+
+.markdown-viewer .preview-floating-controls {background:linear-gradient(transparent,var(--md-bg) 45%)}
+.markdown-viewer .preview-floating-controls .mantine-ActionIcon-root {color:var(--md-fg)}
+.markdown-viewer .preview-floating-controls .mantine-ActionIcon-root:hover {color:var(--md-fg);background:var(--md-pre-bg)}
+.markdown-viewer .preview-floating-controls .lucide {filter:none}
+.markdown-viewer .preview-floating-controls button:focus-visible {outline-color:var(--md-fg)}
+@media(max-width:600px){#viewer-content.markdown-content{padding:24px 20px 100px}}

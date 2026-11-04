@@ -1,6 +1,6 @@
 import React, {useMemo,useState} from 'react';
 import {Tree,useTree} from '@mantine/core';
-import {ChevronDown,Folder,FolderOpen,Image as FileMediaIcon} from 'lucide-react';
+import {ChevronDown,Folder,FolderOpen,FileText,Image as FileMediaIcon} from 'lucide-react';
 export function FolderTree({nodes,current,expanded,toggle,navigate,openFile}) {
   const [limits,setLimits] = useState({});
   const tree = useTree({
@@ -31,7 +31,7 @@ export function FolderTree({nodes,current,expanded,toggle,navigate,openFile}) {
     classNames={{label:'file-tree-row'}} renderNode={({node,expanded:open,elementProps})=><div {...elementProps}
       onClick={event=>{elementProps.onClick(event);activate(node);}}>
       {node.nodeProps.entry?.kind===undefined && !node.nodeProps.more ? <span className="tree-disclosure" onClick={event=>{event.stopPropagation();tree.toggleExpanded(node.value);}} aria-hidden="true"><ChevronDown size={14} style={{transform:open?undefined:'rotate(-90deg)'}}/></span>:<span className="tree-disclosure"/>}
-      {node.nodeProps.more?null:node.nodeProps.entry.kind===undefined?(open?<FolderOpen size={18}/>:<Folder size={18}/>):<FileMediaIcon size={18}/>}
+      {node.nodeProps.more?null:node.nodeProps.entry.kind===undefined?(open?<FolderOpen size={18}/>:<Folder size={18}/>):node.nodeProps.entry.kind==='markdown'?<FileText size={18}/>:<FileMediaIcon size={18}/>}
       <span className="file-tree-link">{node.label}</span>
     </div>}/>;
 }

@@ -1,3 +1,4 @@
+import './markdown.css';
 import {gallerySettings} from './gallery-settings.mjs';
 import {resizeVideoSurface, mountNativeVideoFallback} from './video-surface.mjs';
 import {wrapMediaIndex, mediaNavigationDirection} from './media-navigation.mjs';
@@ -22,7 +23,7 @@ try { settings = JSON.parse(localStorage.getItem(key)) ?? {}; } catch { settings
 if (!settings || typeof settings !== 'object') settings = {};
 gallerySettings.update(settings);
 settings = gallerySettings.getSnapshot();
-let current = '', media = [], shown = 0, cards = [], generation = 0, aborter, frame, viewerIndex = -1;
+let current = '', media = [], documents = [], activeDocument, shown = 0, cards = [], generation = 0, aborter, frame, viewerIndex = -1;
 let scrollPositions = new Map(), restoring = false;
 const expanded = new Set(['']), treeCache = new Map(), dimensions = new Map();
 let treeRender = 0, fileSelection = 0;
@@ -63,6 +64,7 @@ async function renderTree() {
       await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
         while (cursor < files.length && token === treeRender) {
           const item = files[cursor++];
+          if (item.kind === 'markdown') continue;
           if (!dimensions.has(item.path)) {
             try { dimensions.set(item.path, await request(query('/api/metadata', item.path))); }
             catch { dimensions.set(item.path, {}); }
@@ -75,19 +77,21 @@ async function renderTree() {
   }
   const root = await branch({name:config.name,path:''});
   if (token !== treeRender) return;
-  renderFolders([root], $('viewer').open ? media[viewerIndex]?.path : current, expanded, (path,value) => { value ? expanded.add(path) : expanded.delete(path); renderTree().catch(e=>message(e.message)); }, navigate, openTreeFile);
+  renderFolders([root], $('viewer').open ? (activeDocument ?? media[viewerIndex])?.path : current, expanded, (path,value) => { value ? expanded.add(path) : expanded.delete(path); renderTree().catch(e=>message(e.message)); }, navigate, openTreeFile);
 }
 async function openTreeFile(item) {
   const selection = ++fileSelection;
   const parent = item.path.includes('/') ? item.path.slice(0, item.path.lastIndexOf('/')) : '';
 
-  if (current !== parent || !media.some(entry => entry.path === item.path)) {
+  if (current !== parent || ![...media, ...documents].some(entry => entry.path === item.path)) {
     history.replaceState(null, '', `#${encodeURIComponent(parent)}`);
     if (!await load(parent)) return;
   }
   if (selection !== fileSelection || current !== parent) return;
+  const document = documents.find(entry => entry.path === item.path);
+  if (document) { openViewer(-1, item.fragment, document); return; }
   const index = media.findIndex(entry => entry.path === item.path);
-  if (index >= 0) { openViewer(index); renderTree().catch(error => message(error.message)); }
+  if (index >= 0) { openViewer(index, item.fragment); renderTree().catch(error => message(error.message)); }
 }
 function navigate(path) {
   ++fileSelection;
@@ -111,7 +115,7 @@ async function load(path) {
   current = path; viewerIndex = -1;
   closeViewer(false);
   for (const card of cards) card.cleanup();
-  cards = []; shown = 0; media = []; gallery.replaceChildren(); gallery.style.height = '0px';
+  cards = []; shown = 0; media = []; documents = []; gallery.replaceChildren(); gallery.style.height = '0px';
   $('empty').hidden = false; $('empty').textContent = 'Loading folder…'; $('more').hidden = true; $('sidebar-info').textContent = '';
   let prefix = ''; expanded.add('');
   for (const part of current.split('/').filter(Boolean)) { prefix += `${prefix ? '/' : ''}${part}`; expanded.add(prefix); }
@@ -120,7 +124,8 @@ async function load(path) {
     const result = await list(current, settings.recursive, signal);
     if (token !== generation) return;
     if (!settings.recursive) treeCache.set(current, result);
-    media = result.media;
+    media = result.media.filter(item => item.kind !== 'markdown');
+    documents = result.media.filter(item => item.kind === 'markdown');
     renderTree().catch(error => { if (token === generation) message(`File browser: ${error.message}`); });
     if (token !== generation) return;
     if (settings.sort.startsWith('taken-')) {
@@ -129,6 +134,7 @@ async function load(path) {
       await Promise.all(Array.from({ length: 4 }, async () => {
         while (cursor < media.length && token === generation) {
           const item = media[cursor++];
+          if (item.kind === 'markdown') continue;
           if (!dimensions.has(item.path)) dimensions.set(item.path, await request(query('/api/metadata', item.path), signal));
         }
       }));
@@ -141,7 +147,7 @@ async function load(path) {
     message(notices.join(' · '));
     $('sidebar-info').textContent = `${media.length.toLocaleString()} items`;
     $('empty').hidden = media.length > 0;
-    $('empty').textContent = 'No media in this folder.\nTry another folder or enable “Include subdirectories”.';
+    $('empty').textContent = 'No images or videos in this folder.\nMarkdown documents are available in the file tree.';
     viewport.scrollTop = 0;
     addBatch();
     const savedScroll = scrollPositions.get(current) ?? 0;
@@ -280,8 +286,8 @@ document.addEventListener('focusin', event => {
 const previewControls = bindPreviewControls($('viewer'), $('preview-controls'));
 document.addEventListener('visibilitychange', () => { for (const card of cards) card.updatePlayback(); });
 const cancelImagePan = bindImagePan($('viewer-content'));
-let unmountVideoPlayer;
-function clearViewer() { cancelImagePan(); $('viewer-content').classList.remove('can-pan'); for (const video of $('viewer-content').querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); } unmountVideoPlayer?.(); unmountVideoPlayer = undefined; $('viewer-content').replaceChildren(); }
+let unmountVideoPlayer, markdownAborter;
+function clearViewer() { activeDocument = undefined; markdownAborter?.abort(); markdownAborter = undefined; $('viewer').classList.remove('markdown-viewer'); $('viewer-content').classList.remove('markdown-content'); cancelImagePan(); $('viewer-content').classList.remove('can-pan'); for (const video of $('viewer-content').querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); } unmountVideoPlayer?.(); unmountVideoPlayer = undefined; $('viewer-content').replaceChildren(); }
 let viewerScale = 1, fitMode = true, viewerPointer;
 let viewerMetadata = {};
 function setPreviewMode(active) {
@@ -307,7 +313,7 @@ function closeViewer(restoreFocus = true) {
   }
 }
 function refreshViewerInfo() {
-  const item = media[viewerIndex];
+  const item = activeDocument ?? media[viewerIndex];
   if (!item) return;
   const info = mediaInfo(item, viewerMetadata);
   $('sidebar-info').textContent = info.details;
@@ -317,7 +323,7 @@ $('viewer-content').addEventListener('pointermove', event => {
 });
 $('viewer-content').addEventListener('pointerleave', () => { viewerPointer = undefined; });
 function updateViewerZoom() {
-  const content = $('viewer-content'), img = content.querySelector('img');
+  const content = $('viewer-content'), img = content.querySelector(':scope > img');
   const host = content.querySelector('.video-player-host');
   if (host) {
     if (!resizeVideoSurface(host, content)) return;
@@ -336,7 +342,7 @@ function updateViewerZoom() {
   content.classList.toggle('can-pan', img.offsetWidth > content.clientWidth || img.offsetHeight > content.clientHeight);
 }
 function zoomViewer(direction, reset = false, point, scale) {
-  const content = $('viewer-content'), img = content.querySelector('img');
+  const content = $('viewer-content'), img = content.querySelector(':scope > img');
   if (!img?.naturalWidth) return;
   const resize = () => {
     fitMode = reset;
@@ -349,7 +355,7 @@ function zoomViewer(direction, reset = false, point, scale) {
 }
 new ResizeObserver(() => { if ($('viewer').open) updateViewerZoom(); }).observe($('viewer-content'));
 bindZoomInput(document.querySelector('.app-shell'), {
-  isEnabled: () => $('viewer').open && Boolean($('viewer-content').querySelector('img')),
+  isEnabled: () => $('viewer').open && Boolean($('viewer-content').querySelector(':scope > img')),
   key: (direction, reset) => zoomViewer(direction, reset, viewerPointer),
   wheel: event => {
     if (!event.deltaY) return;
@@ -379,28 +385,56 @@ function updateViewerAtmosphere(image) {
     }
   } catch { /* Keep the neutral backdrop when a format cannot be sampled. */ }
 }
-function openViewer(index) {
-  index = wrapMediaIndex(index, media.length);
-  if (index === -1 || (index === viewerIndex && $('viewer').open)) return;
+function openViewer(index, fragment, documentItem) {
+  index = documentItem ? -1 : wrapMediaIndex(index, media.length);
+  if (!documentItem && (index === -1 || (index === viewerIndex && !activeDocument && $('viewer').open))) return;
   const sidebarFocus = sidebar.contains(document.activeElement) ? document.activeElement : null;
   viewerIndex = index; viewerPointer = undefined; clearViewer();
   document.querySelector('.app-shell').style.removeProperty('--ambient');
-  const item = media[index];
+  activeDocument = documentItem;
+  const item = documentItem ?? media[index];
   fitMode = true; viewerScale = 1;
   $('viewer-content').scrollTo(0, 0);
   $('viewer').setAttribute('aria-label', `Preview ${item.name}`);
   viewerMetadata = {}; refreshViewerInfo();
   const isVideo = item.kind === 'video' || Boolean(item.liveVideo);
+  const isMarkdown = item.kind === 'markdown';
+  for (const id of ['previous', 'next']) $(id).hidden = isMarkdown;
   $('actual-view').setAttribute('aria-label', isVideo ? 'Reset video to fit' : 'View image at original size');
   for (const [id, action, key] of [['zoom-in', 'Zoom in', '+'], ['zoom-out', 'Zoom out', '−']]) {
     const label = isVideo ? action : `${action} (Ctrl ${key})`;
     $(id).setAttribute('aria-label', label);
   }
-  for (const id of ['zoom-in', 'zoom-out', 'actual-view']) { $(id).disabled = isVideo; $(id).hidden = isVideo; }
-  $('zoom-divider').hidden = isVideo;
+  for (const id of ['zoom-in', 'zoom-out', 'actual-view']) { $(id).disabled = isVideo || isMarkdown; $(id).hidden = isVideo || isMarkdown; }
+  $('zoom-divider').hidden = isVideo || isMarkdown;
   $('actual-view').textContent = '—';
   let element;
-  if (item.kind === 'video' || item.liveVideo) {
+  if (isMarkdown) {
+    element = document.createElement('article'); element.className = 'markdown-body';
+    element.setAttribute('aria-label', item.name); element.textContent = 'Loading document…';
+    $('viewer').classList.add('markdown-viewer'); $('viewer-content').classList.add('markdown-content');
+    markdownAborter = new AbortController();
+    const signal = markdownAborter.signal;
+    Promise.all([import('./markdown.mjs'), fetch(mediaUrl(item.path), { signal }).then(async response => {
+      if (!response.ok) throw new Error(`Unable to open document (${response.status})`);
+      return response.text();
+    })]).then(([{ renderMarkdown, scrollToFragment }, source]) => {
+      if (signal.aborted || !element.isConnected) return;
+      element.innerHTML = renderMarkdown(source, item.path);
+      scrollToFragment(element, fragment);
+      element.addEventListener('click', event => {
+        const link = event.target.closest('a');
+        if (!link || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        if (link.dataset.documentPath) {
+          event.preventDefault();
+          if (link.dataset.documentPath === item.path) {
+            if (link.dataset.documentFragment) scrollToFragment(element, link.dataset.documentFragment);
+            else $('viewer-content').scrollTo(0, 0);
+          } else openTreeFile({ path: link.dataset.documentPath, fragment: link.dataset.documentFragment }).catch(error => message(error.message));
+        }
+      });
+    }).catch(error => { if (!signal.aborted && element.isConnected) element.textContent = error.message; });
+  } else if (item.kind === 'video' || item.liveVideo) {
     element = document.createElement('div'); element.className = 'video-player-host';
     const surface = document.createElement('div'); surface.className = 'video-zoom-surface'; element.append(surface);
     const fallback = error => {
@@ -451,7 +485,7 @@ function openViewer(index) {
   };
   $('viewer-content').append(element);
   updateViewerZoom();
-  Promise.all([request(query('/api/metadata', item.path)), item.liveVideo ? request(query('/api/metadata', item.liveVideo)) : Promise.resolve({})])
+  if (!isMarkdown) Promise.all([request(query('/api/metadata', item.path)), item.liveVideo ? request(query('/api/metadata', item.liveVideo)) : Promise.resolve({})])
     .then(([primary, live]) => {
       if (!element.isConnected) return;
       // Decoded dimensions remain authoritative (including browser EXIF rotation).
@@ -475,7 +509,7 @@ $('actual-view').onclick = () => zoomViewer(0, false, undefined, 1);
 $('zoom-in').onclick = () => zoomViewer(1);
 $('zoom-out').onclick = () => zoomViewer(-1);
 $('viewer-content').ondblclick = event => {
-  if (event.target.tagName !== 'IMG') return;
+  if (event.target.tagName !== 'IMG' || event.target.parentElement !== $('viewer-content')) return;
   zoomViewer(0, !fitMode, { x: event.clientX, y: event.clientY }, 1);
 };
 document.addEventListener('keydown', event => {
@@ -490,6 +524,7 @@ document.addEventListener('keydown', event => {
 $('previous').onclick = () => openViewer(viewerIndex - 1);
 $('next').onclick = () => openViewer(viewerIndex + 1);
 $('viewer').addEventListener('keydown', event => {
+  if (activeDocument) return;
   if (event.target.closest('input, textarea, select, [contenteditable="true"], [role="menu"]')) return;
   const direction = mediaNavigationDirection(event);
   if (!direction) return;

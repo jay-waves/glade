@@ -1,6 +1,6 @@
 {
   "name": "glade",
-  "version": "0.3.0",
+  "version": "0.2.1",
   "description": "A local media gallery for your folders",
   "type": "module",
   "private": true,
@@ -20,6 +20,7 @@
     "@mantine/hooks": "^9.7.4",
     "@videojs/react": "^10.3.0",
     "lucide-react": "^1.68.0",
+    "markdown-it": "^15.0.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-photo-album": "^3.6.2"

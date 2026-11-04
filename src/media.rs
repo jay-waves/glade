@@ -19,6 +19,7 @@ pub fn extension(path: &Path) -> String {
 }
 pub fn kind(path: &Path) -> Option<&'static str> {
     match extension(path).as_str() {
+        "md" => Some("markdown"),
         "jpg" | "jpeg" | "jfif" | "png" | "gif" | "webp" | "avif" | "bmp" | "ico" | "svg"
         | "apng" | "heic" | "heif" | "tif" | "tiff" | "jxl" => Some("image"),
         "mp4" | "m4v" | "mov" | "webm" | "ogv" | "mkv" | "avi" | "mpg" | "mpeg" | "mts"
@@ -105,6 +106,12 @@ fn publish(temporary: TempPath, target: &Path) -> ApiResult<()> {
 }
 
 pub async fn thumbnail(file: &Path, cache: &Path) -> ApiResult<PathBuf> {
+    if kind(file) == Some("markdown") {
+        return Err(AppError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Markdown has no thumbnail",
+        ));
+    }
     let target = cache_path(file, cache, "jpg").await?;
     if target.is_file() {
         return Ok(target);
@@ -224,6 +231,9 @@ fn photo_metadata(path: &Path) -> Value {
 }
 
 pub async fn metadata(file: &Path, cache: &Path) -> ApiResult<Value> {
+    if kind(file) == Some("markdown") {
+        return Ok(json!({}));
+    }
     let target = cache_path(file, cache, "json").await?;
     if let Ok(bytes) = tokio::fs::read(&target).await {
         if let Ok(value) = serde_json::from_slice(&bytes) {

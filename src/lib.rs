@@ -152,7 +152,7 @@ async fn guard(State(state): State<Arc<AppState>>, req: Request, next: Next) -> 
         HeaderValue::from_static("nosniff"),
     );
     headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
-    headers.insert("content-security-policy", HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"));
+    headers.insert("content-security-policy", HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https: http:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"));
     headers
         .entry(header::CACHE_CONTROL)
         .or_insert(HeaderValue::from_static("no-cache"));
