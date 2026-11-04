@@ -420,7 +420,7 @@ function openViewer(index, fragment, documentItem) {
       return response.text();
     })]).then(([{ renderMarkdown, scrollToFragment }, source]) => {
       if (signal.aborted || !element.isConnected) return;
-      element.innerHTML = renderMarkdown(source, item.path);
+      element.replaceChildren(renderMarkdown(source, item.path));
       scrollToFragment(element, fragment);
       element.addEventListener('click', event => {
         const link = event.target.closest('a');

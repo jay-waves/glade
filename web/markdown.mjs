@@ -1,6 +1,7 @@
 import MarkdownIt from 'markdown-it';
+import createDOMPurify from 'dompurify';
 
-const md = new MarkdownIt({ html: false, linkify: false, typographer: false });
+const md = new MarkdownIt({ html: true, linkify: false, typographer: false });
 
 // Resolve filesystem-relative URLs without letting .. escape the gallery root.
 export function localTarget(href, documentPath) {
@@ -21,33 +22,21 @@ export function localTarget(href, documentPath) {
   return { path: parts.join('/'), fragment };
 }
 
-function rewriteUrl(token, attribute, env) {
-  const href = token.attrGet(attribute) ?? '';
-  if (/^(?:https?:|mailto:)/i.test(href) || href.startsWith('//')) return;
-  const target = localTarget(href, env.path);
-  if (!target) { token.attrSet(attribute, ''); return; }
-  token.attrSet(attribute, `/media?${new URLSearchParams({ path: target.path })}${target.fragment ? '#' + target.fragment : ''}`);
+// Process both Markdown-generated elements and embedded HTML through one path.
+function rewriteUrl(node, attribute, path) {
+  const href = node.getAttribute(attribute)?.trim();
+  if (href === undefined || href === null) return;
+  if (/^https?:/i.test(href) || href.startsWith('//') || (attribute === 'href' && /^mailto:/i.test(href))) return;
+  const target = localTarget(href, path);
+  if (!target || !href) { node.removeAttribute(attribute); return; }
+  node.setAttribute(attribute, `/media?${new URLSearchParams({ path: target.path })}${target.fragment ? '#' + target.fragment : ''}`);
   if (attribute === 'href' && /\.md$/i.test(target.path)) {
-    token.attrSet('data-document-path', target.path);
-    token.attrSet('data-document-fragment', target.fragment);
+    node.setAttribute('data-document-path', target.path);
+    node.setAttribute('data-document-fragment', target.fragment);
   }
 }
-const image = md.renderer.rules.image;
-md.renderer.rules.image = (tokens, index, options, env, self) => {
-  rewriteUrl(tokens[index], 'src', env);
-  tokens[index].attrSet('loading', 'lazy');
-  return image(tokens, index, options, env, self);
-};
-md.renderer.rules.link_open = (tokens, index, options, env, self) => {
-  rewriteUrl(tokens[index], 'href', env);
-  if (!tokens[index].attrGet('data-document-path')) {
-    tokens[index].attrSet('target', '_blank');
-    tokens[index].attrSet('rel', 'noopener noreferrer');
-  }
-  return self.renderToken(tokens, index, options);
-};
 
-export function renderMarkdown(source, path) {
+export function renderMarkdown(source, path, window = globalThis.window) {
   const tokens = md.parse(source, { path });
   const used = new Set();
   for (let i = 0; i < tokens.length; i++) {
@@ -58,13 +47,51 @@ export function renderMarkdown(source, path) {
     while (used.has(id)) id = `${base}-${++suffix}`;
     used.add(id); tokens[i].attrSet('id', id);
   }
-  return md.renderer.render(tokens, md.options, { path });
+  const purifier = createDOMPurify(window);
+  purifier.addHook('afterSanitizeAttributes', node => {
+    if (node.nodeType !== 1) return;
+    // Keep table alignment (including markdown-it's output), not arbitrary CSS.
+    const alignment = node.style?.textAlign;
+    node.removeAttribute('style');
+    if (['left', 'center', 'right', 'justify'].includes(alignment)) node.style.textAlign = alignment;
+    const align = node.getAttribute('align');
+    if (align && !['left', 'center', 'right', 'justify'].includes(align)) node.removeAttribute('align');
+    if (node.tagName === 'IMG') {
+      rewriteUrl(node, 'src', path);
+      node.setAttribute('loading', 'lazy');
+      // Explicit HTML dimensions override the reader's responsive height:auto.
+      for (const dimension of ['width', 'height']) {
+        const value = node.getAttribute(dimension);
+        if (value && /^\d+(?:\.\d+)?$/.test(value)) node.style[dimension] = `${value}px`;
+      }
+    }
+    if (node.tagName === 'A') {
+      rewriteUrl(node, 'href', path);
+      if (node.hasAttribute('href') && !node.hasAttribute('data-document-path')) {
+        node.setAttribute('target', '_blank');
+        node.setAttribute('rel', 'noopener noreferrer');
+      }
+    }
+  });
+  return purifier.sanitize(md.renderer.render(tokens, md.options, { path }), {
+    ALLOWED_TAGS: ['p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+      'blockquote', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 's', 'del',
+      'pre', 'code', 'a', 'img', 'table', 'thead', 'tbody', 'tfoot', 'tr',
+      'th', 'td', 'caption', 'colgroup', 'col', 'div', 'span', 'sub', 'sup', 'details', 'summary', 'kbd', 'mark',
+      'figure', 'figcaption', 'dl', 'dt', 'dd', 'abbr', 'small', 'samp'],
+    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'width', 'height', 'colspan',
+      'rowspan', 'scope', 'span', 'align', 'valign', 'start', 'reversed', 'id', 'style', 'open'],
+    ALLOW_DATA_ATTR: false,
+    ALLOW_ARIA_ATTR: false,
+    SANITIZE_NAMED_PROPS: true,
+    RETURN_DOM_FRAGMENT: true,
+  });
 }
 
 export function scrollToFragment(article, fragment) {
   if (!fragment) return;
   try {
     const id = decodeURIComponent(fragment);
-    [...article.querySelectorAll('[id]')].find(node => node.id === id)?.scrollIntoView({ block: 'start' });
+    [...article.querySelectorAll('[id]')].find(node => node.id === `user-content-${id}`)?.scrollIntoView({ block: 'start' });
   } catch { /* A malformed fragment does not prevent opening the document. */ }
 }
