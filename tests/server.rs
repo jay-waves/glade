@@ -137,7 +137,15 @@ async fn directory_listing_streaming_and_embedded_assets() {
         .unwrap()
         .contains("媒体画廊")
     );
-    for asset in ["/app.mjs", "/style.css", "/layout.mjs", "/playback.mjs"] {
+    for asset in [
+        "/app.mjs",
+        "/icons.mjs",
+        "/style.css",
+        "/layout.mjs",
+        "/playback.mjs",
+        "/fonts/MonaSansVF.woff2",
+        "/fonts/OFL.txt",
+    ] {
         let response = request(&app, asset, &[]).await;
         assert_eq!(response.status(), StatusCode::OK);
         if asset.ends_with("mjs") {

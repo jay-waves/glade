@@ -1,8 +1,12 @@
+import { icon } from './icons.mjs';
 import { layout } from './layout.mjs';
 import { createGalleryPlaybackQueue } from './playback.mjs';
 
 const $ = id => document.getElementById(id);
+for (const element of document.querySelectorAll('[data-icon]')) element.append(icon(element.dataset.icon));
 const config = await request('/api/config');
+$('root-name').textContent = config.name;
+$('root-name').title = config.root;
 document.title = `${config.name} · glade`;
 const key = `glade:${config.root}`;
 let settings;
@@ -23,7 +27,10 @@ for (const id of controls) {
 }
 settings.rows = settings.rows === true;
 updateLayoutButtons();
-if (matchMedia('(max-width:720px)').matches) document.body.classList.add('tree-hidden');
+const narrow = matchMedia('(max-width:960px)');
+if (narrow.matches || settings.treeHidden) document.body.classList.add('tree-hidden');
+const initialWidth = Math.max(180, Math.min(480, Number(settings.sidebarWidth) || 245));
+setSidebarWidth(initialWidth);
 $('toggle-tree').setAttribute('aria-expanded', String(!document.body.classList.contains('tree-hidden')));
 
 async function request(url, signal) {
@@ -52,15 +59,16 @@ async function renderTree() {
     row.style.paddingLeft = `${depth * 14}px`;
     const toggle = document.createElement('button');
     toggle.className = 'expand';
-    toggle.textContent = expanded.has(node.path) ? '⌄' : '›';
+    toggle.append(icon(expanded.has(node.path) ? 'down' : 'right'));
     toggle.setAttribute('aria-label', `${expanded.has(node.path) ? '折叠' : '展开'} ${node.name}`);
     toggle.setAttribute('aria-expanded', String(expanded.has(node.path)));
     toggle.onclick = () => { expanded.has(node.path) ? expanded.delete(node.path) : expanded.add(node.path); renderTree().catch(error => message(error.message)); };
     const button = document.createElement('button');
     button.className = 'folder';
     button.title = node.path || config.root;
-    const icon = document.createElement('span'); icon.className = 'folder-icon'; icon.textContent = '▱';
-    button.append(icon, document.createTextNode(node.name));
+    const visual = document.createElement('span'); visual.className = 'folder-icon'; visual.append(icon('folder'));
+    const label = document.createElement('span'); label.className = 'folder-label'; label.textContent = node.name;
+    button.append(visual, label);
     if (node.path === current) button.setAttribute('aria-current', 'page');
     button.onclick = () => navigate(node.path);
     row.append(toggle, button); parent.append(row);
@@ -78,10 +86,11 @@ function breadcrumbs() {
   $('breadcrumbs').replaceChildren();
   for (const [index, item] of items.entries()) {
     if (index) { const separator = document.createElement('span'); separator.className = 'separator'; separator.textContent = '/'; $('breadcrumbs').append(separator); }
-    const button = document.createElement('button'); button.textContent = item.name; button.onclick = () => navigate(item.path); $('breadcrumbs').append(button);
+    const button = document.createElement('button'); button.textContent = item.name; if (index === items.length - 1) button.setAttribute('aria-current', 'page'); button.onclick = () => navigate(item.path); $('breadcrumbs').append(button);
   }
 }
 function navigate(path) {
+  if (narrow.matches) setTreeHidden(true);
   const hash = `#${encodeURIComponent(path)}`;
   if (location.hash === hash || (!path && !location.hash)) load(path);
   else location.hash = hash;
@@ -175,7 +184,7 @@ function makeCard(item, index) {
   };
   let video;
   if (item.kind === 'video' || item.liveVideo) {
-    const badge = document.createElement('span'); badge.className = 'badge'; badge.textContent = item.liveVideo ? '◉ LIVE' : '▶ VIDEO'; element.append(badge);
+    const badge = document.createElement('span'); badge.className = 'badge'; badge.append(icon(item.liveVideo ? 'live' : 'play')); badge.title = item.liveVideo ? 'Live Photo' : '视频'; badge.setAttribute('aria-label', badge.title); element.append(badge);
     video = document.createElement('video'); video.muted = true; video.loop = true; video.playsInline = true; video.preload = 'none'; element.insertBefore(video, caption);
     video.addEventListener('playing', () => { video.classList.add('playing'); state.cancel?.markPlaying(); });
     video.addEventListener('loadedmetadata', () => { if (!item.liveVideo && video.videoWidth) { state.ratio = video.videoWidth / video.videoHeight; scheduleLayout(); } });
@@ -217,10 +226,61 @@ $('more').onclick = addBatch;
 function updateLayoutButtons() { $('masonry').setAttribute('aria-pressed', String(!settings.rows)); $('rows').setAttribute('aria-pressed', String(settings.rows)); }
 for (const name of ['masonry', 'rows']) $(name).onclick = () => { settings.rows = name === 'rows'; updateLayoutButtons(); save(); placeCards(); };
 $('size').oninput = () => { save(); placeCards(); };
+for (const [id, direction] of [['smaller', -1], ['larger', 1]]) $(id).onclick = () => {
+  $('size').value = Math.max(120, Math.min(440, Number($('size').value) + direction * 20));
+  $('size').oninput();
+};
+for (const menu of document.querySelectorAll('details.options')) {
+  menu.addEventListener('toggle', () => {
+    if (menu.open) for (const other of document.querySelectorAll('details.options')) if (other !== menu) other.open = false;
+  });
+}
+document.addEventListener('click', event => {
+  for (const menu of document.querySelectorAll('details.options[open]')) if (!menu.contains(event.target)) menu.open = false;
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || $('viewer').open) return;
+  const menu = document.querySelector('details.options[open]');
+  if (menu) { menu.open = false; menu.querySelector('summary').focus(); }
+  else if (narrow.matches) setTreeHidden(true);
+});
 for (const id of ['recursive', 'hidden', 'sort']) $(id).onchange = () => { save(); if (id === 'hidden') treeCache.clear(); load(current); };
 $('autoplay').onchange = () => { save(); for (const card of cards) card.updatePlayback(); };
 $('refresh').onclick = () => { treeCache.clear(); dimensions.clear(); load(current); };
-$('toggle-tree').onclick = () => { document.body.classList.toggle('tree-hidden'); $('toggle-tree').setAttribute('aria-expanded', String(!document.body.classList.contains('tree-hidden'))); };
+function setTreeHidden(hidden) {
+  document.body.classList.toggle('tree-hidden', hidden);
+  $('toggle-tree').setAttribute('aria-expanded', String(!hidden));
+  if (!narrow.matches) { settings.treeHidden = hidden; save(); }
+}
+$('toggle-tree').onclick = () => setTreeHidden(!document.body.classList.contains('tree-hidden'));
+$('drawer-backdrop').onclick = () => setTreeHidden(true);
+narrow.addEventListener('change', () => setTreeHidden(narrow.matches || Boolean(settings.treeHidden)));
+function setSidebarWidth(width) {
+  document.body.style.setProperty('--sidebar-width', `${width}px`);
+  $('sidebar-resize').setAttribute('aria-valuenow', String(Math.round(width)));
+}
+const resizer = $('sidebar-resize');
+resizer.onpointerdown = event => {
+  if (event.button !== 0) return;
+  event.preventDefault(); resizer.setPointerCapture(event.pointerId);
+  document.body.classList.add('resizing');
+};
+resizer.onpointermove = event => {
+  if (!resizer.hasPointerCapture(event.pointerId)) return;
+  settings.sidebarWidth = Math.max(180, Math.min(480, event.clientX - 49));
+  setSidebarWidth(settings.sidebarWidth);
+};
+resizer.onlostpointercapture = () => { document.body.classList.remove('resizing'); save(); };
+resizer.onpointerup = event => {
+  if (resizer.hasPointerCapture(event.pointerId)) resizer.releasePointerCapture(event.pointerId);
+};
+resizer.onkeydown = event => {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const value = Number(resizer.getAttribute('aria-valuenow'));
+  settings.sidebarWidth = event.key === 'Home' ? 180 : event.key === 'End' ? 480 : Math.max(180, Math.min(480, value + (event.key === 'ArrowRight' ? 10 : -10)));
+  setSidebarWidth(settings.sidebarWidth); save();
+};
 document.addEventListener('visibilitychange', () => { for (const card of cards) card.updatePlayback(); });
 function clearViewer() { for (const video of $('viewer-content').querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); } $('viewer-content').replaceChildren(); }
 function openViewer(index) {
