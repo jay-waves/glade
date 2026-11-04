@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { galleryLayout, galleryRowLayout } from '../web/gallery/gallery-layout.mjs';
+import { galleryLayout, galleryRowLayout, galleryColumns, galleryUsesRows } from '../web/gallery/gallery-layout.mjs';
 const layout = (ratios, width, size, rows) => (rows ? galleryRowLayout : galleryLayout)(ratios, width, size);
 
 test('migrated layouts keep cards inside the viewport without overlap', () => {
@@ -18,4 +18,21 @@ test('migrated layouts keep cards inside the viewport without overlap', () => {
       }
     });
   }
+});
+
+test('narrow galleries use at most two masonry columns regardless of row preference', () => {
+  for (const width of [280, 400, 540, 700]) {
+    assert.equal(galleryUsesRows(width, true), false);
+    for (const size of [140, 220, 420]) {
+      const columns = galleryColumns(width, size);
+      assert.ok(columns >= 1 && columns <= 2);
+      const { items } = galleryLayout([1.5, 0.6, 2, 1, 0.3, 4], width, size);
+      assert.equal(new Set(items.map(item => item.left)).size, columns);
+      assert.ok(items.every(item => item.left + item.width <= width + 0.001));
+    }
+  }
+  assert.equal(galleryColumns(280, 220), 1);
+  assert.equal(galleryColumns(540, 220), 2);
+  assert.equal(galleryUsesRows(701, true), true);
+  assert.equal(galleryUsesRows(1440, false), false);
 });

@@ -60,4 +60,20 @@ MIT. The interface styling, playback queue, and masonry layout strategy are adap
 
 ## Frontend
 
-The English-only frontend uses React, Primer, Octicons and Tailwind. PathBar, FileToolbar, theme styles, gallery layout and zoom modules are migrated from lib.ts. The ribbon is omitted. Glade's media adapter handles its own Rust API and playback queue. Run `npm run build` before Cargo commands; Vite writes `dist/`, which Rust embeds in the executable. Windows CI performs both builds. Node.js is needed only at build time.
+The English-only frontend uses React, Mantine, Lucide and Tailwind. Theme styles, gallery layout and zoom modules are adapted from lib.ts. The ribbon is omitted. Glade's media adapter handles its own Rust API and playback queue. Run `npm run build` before Cargo commands; Vite writes `dist/`, which Rust embeds in the executable. Windows CI performs both builds. Node.js is needed only at build time.
+
+## Local development
+
+Run the frontend with automatic updates and a local Rust media server:
+
+```sh
+npm run dev -- /path/to/photos
+```
+
+Open http://127.0.0.1:5173. CSS changes update in place; JavaScript changes reload
+the page automatically. The Rust backend runs on port 49193; Vite proxies API,
+media and thumbnail requests. Frontend edits do not require rebuilding Rust.
+The first run builds embedded assets if missing. Stop both servers with Ctrl+C.
+Without a path, the current directory is used. Set `GLADE_MEDIA_DIR` or
+`GLADE_BACKEND_PORT` to override the default media directory or backend port.
+Rust source changes require restarting the command.

@@ -1,0 +1,129 @@
+@reference "../tailwind.css";
+
+/* Reuse application controls with a quiet overlay palette. */
+@layer components {
+  .library-video {
+    --ui-control-color: rgb(255 255 255 / 82%);
+    --ui-control-hover-color: white;
+    --ui-control-hover-bg: rgb(255 255 255 / 10%);
+    --ui-control-radius: var(--radius-control);
+    --ui-focus-offset: 2px;
+  }
+  .library-video .ui-icon-button svg { opacity: .85; transition: opacity 140ms ease; }
+  .library-video .ui-icon-button:hover svg { opacity: 1; }
+  .video-speed { width: auto; min-width: 32px; padding-inline: 3px; font-variant-numeric: tabular-nums; transition: color var(--motion-fast); }
+  .video-speed:hover { color: white; }
+  .video-popup { @apply z-2 rounded p-1 text-white; border: 0; background: rgb(0 0 0 / 62%); --media-popup-side-offset: 8px; }
+  .video-speed-option, .video-time { font-variant-numeric: tabular-nums; }
+  .video-speed-option { @apply cursor-pointer rounded-xs px-2.5 py-1 text-center outline-none; color: rgb(255 255 255 / 72%); }
+  .video-speed-option[aria-checked="true"] { color: white; font-weight: 600; }
+  .video-speed-option[data-highlighted] { background: rgb(255 255 255 / 12%); color: white; }
+  .video-time { @apply min-w-0 shrink overflow-hidden font-code whitespace-nowrap; color: rgb(255 255 255 / 78%); }
+  .video-slider { @apply relative flex touch-none cursor-pointer items-center; }
+  .video-slider[data-disabled] { cursor: default; opacity: .4; }
+  .video-track { position: relative; background: rgb(255 255 255 / 38%); }
+  .library-video-fill, .library-video-buffer { position: absolute; inset: 0 auto 0 0; }
+  .library-video-fill { width: var(--media-slider-fill, 0%); background: white; }
+  .library-video-buffer { width: var(--media-slider-buffer, 0%); background: rgb(255 255 255 / 54%); }
+  .library-video-thumb { @apply absolute size-2.5 rounded-full bg-white; left: var(--media-slider-fill, 0%); top: 50%; transform: translate(-50%, -50%); }
+  .video-seek .library-video-thumb { opacity: 0; transition: opacity 140ms ease; }
+  .video-seek:is(:hover, :focus-within, [data-dragging]) .library-video-thumb { opacity: 1; }
+  .library-video-controls {
+    @apply pointer-events-none absolute inset-x-0 bottom-0 z-1 flex items-center gap-1.5 px-2.5 pt-4 pb-2 text-white opacity-0;
+    background: linear-gradient(transparent, rgb(0 0 0 / 72%));
+    transition: opacity 220ms ease;
+  }
+  .library-video[data-compact] .video-duration { display: none; }
+  .library-video[data-compact] .library-video-controls { gap: 3px; padding-inline: 5px; }
+  .library-video[data-compact] .video-time { font-size: 10px; }
+  @media (prefers-reduced-motion: reduce) {
+    .library-video-controls, .library-video .ui-icon-button svg, .library-video-thumb, .video-speed { transition: none; }
+  }
+}
+
+/* Dynamic geometry and state remain local to the media surface. */
+.library-video-media { aspect-ratio: var(--video-aspect-ratio, auto); }
+
+/* Video.js supplies these percentages; vertical volume uses the same parts. */
+.library-video-volume .library-video-fill { top: auto; width: 100%; height: var(--media-slider-fill, 0%); }
+.library-video-volume .library-video-thumb { left: 50%; top: calc(100% - var(--media-slider-fill, 0%)); }
+.main-panel:has(.library-video):focus-visible { outline: none; }
+
+.library-video:fullscreen {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  border-radius: 0;
+}
+.library-video:fullscreen .library-video-frame {
+  width: min(100%, calc(100vh * var(--video-aspect-ratio, 1.777778)));
+  aspect-ratio: var(--video-aspect-ratio, 1.777778);
+}
+.library-video:fullscreen .library-video-media {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-position: center;
+}
+
+/* The preview owns a viewport-sized player surface. */
+.video-player-host{position:relative;display:block;width:100%;height:100%;flex:none;margin:auto;min-width:0}
+.video-zoom-surface{position:absolute;left:0;top:0;transform-origin:top left}
+.video-player-host .library-video{flex:none;border-radius:0;background:transparent}
+.video-zoom-surface .library-video,
+.video-zoom-surface .library-video:fullscreen{width:100%;height:100%;max-width:none;max-height:none;display:block;margin:0}
+.video-player-host .library-video:fullscreen{background:#000}
+.video-zoom-surface .library-video-frame,
+.video-player-host .library-video:fullscreen .library-video-frame{width:100%;height:100%;aspect-ratio:auto;margin:0}
+#viewer-content .video-zoom-surface .library-video-media{width:100%;height:100%;max-height:none;max-width:100%;object-fit:contain}
+
+/* Larger, quiet controls for the full-window viewer. */
+.library-video .ui-icon-button{
+  width:44px;height:44px;border-radius:var(--radius-control);
+  color:rgb(255 255 255 / 86%);
+  transition:background-color 150ms ease,color 150ms ease;
+}
+.library-video .ui-icon-button:hover,
+.library-video .ui-icon-button[aria-expanded="true"]{background:rgb(255 255 255 / 10%);color:white}
+.library-video-controls{
+  display:block;flex-wrap:nowrap;gap:4px;padding:30px 24px calc(16px + env(safe-area-inset-bottom,0px));
+  background:linear-gradient(transparent,rgb(12 17 24 / 68%));
+}
+.library-video .video-time{font-family:var(--font-body);font-size:var(--text-control);font-weight:var(--media-control-weight);line-height:20px;color:rgb(255 255 255 / 84%)}
+.library-video .video-duration{color:rgb(255 255 255 / 54%)}
+.library-video .video-speed{width:auto;min-width:48px;padding-inline:8px;font-size:var(--text-control);font-weight:var(--media-control-weight)}
+.video-seek{height:44px;margin-inline:6px}
+.video-seek .video-track{height:3px;border-radius:999px;background:rgb(255 255 255 / 24%)}
+.library-video-fill,.library-video-buffer{border-radius:inherit}
+.library-video-buffer{background:rgb(255 255 255 / 36%)}
+.library-video-thumb{width:12px;height:12px}
+.video-popup{
+  padding:6px;border:1px solid rgb(255 255 255 / 10%);border-radius:var(--radius-surface);
+  background:#202421;color:white;font-family:var(--font-body);
+}
+.video-speed-option{min-height:36px;min-width:64px;padding:8px 12px;border-radius:var(--radius-control);font-size:var(--text-control);line-height:20px}
+.video-volume-popup{padding:16px 8px}
+.library-video-volume{height:112px;width:32px}
+.library-video-volume .video-track{width:3px;border-radius:999px}
+.library-video[data-compact] .library-video-controls{gap:2px;padding:24px 12px calc(8px + env(safe-area-inset-bottom,0px))}
+.library-video[data-compact] .video-time{font-size:12px}
+.library-video[data-compact] .video-seek{margin-inline:2px}
+@media(prefers-reduced-motion:reduce){.library-video .ui-icon-button{transition:none}}
+@media(prefers-reduced-transparency:reduce){.video-popup{background:#161b22;backdrop-filter:none;-webkit-backdrop-filter:none}}
+
+/* Shared delayed visibility; timeline fills the same row as the controls. */
+.library-video-controls .video-seek{order:0;flex:1 1 0;min-width:24px;margin:0 6px;height:44px}
+.library-video-controls .video-time{flex:0 0 auto}
+.library-video-controls[data-visible="true"]{opacity:1;pointer-events:auto}
+.library-video-controls[data-visible="false"]{opacity:0;pointer-events:none}
+.library-video[data-compact] .ui-icon-button{width:28px;height:40px}
+.library-video[data-compact] .video-speed{min-width:36px;padding-inline:2px}
+
+.library-video-controls .lucide{stroke-width:var(--media-icon-stroke)}
+
+/* Stable centered control row shared with image previews. */
+.media-controls-row{display:flex;align-items:center;gap:4px;width:100%;max-width:960px;margin-inline:auto}
+.library-video[data-compact] .media-controls-row{gap:2px}

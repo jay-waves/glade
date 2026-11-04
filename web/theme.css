@@ -1,7 +1,48 @@
-/* Application tokens; Primer names are isolated in primer.css. */
+/* Application palette shared by Mantine and media surfaces. */
 :root {
   --font-body: "Mona Sans VF", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --surface-shadow: 0 1px 2px light-dark(#18221b08, #00000029),
-    0 4px 14px light-dark(#18221b08, #00000024);
-  --surface-shadow-soft: 0 0 8px 2px color-mix(in srgb, var(--color-text-muted) 12%, transparent);
+  --radius-control: 8px;
+  --radius-surface: 12px;
+  --radius-panel: 16px;
+  --control-size: 32px;
+  --media-icon-stroke: 2;
+  --media-control-weight: 550;
+  --text-control: 13px;
+  --motion-fast: 140ms;
+  --surface-shadow: none;
+  --surface-shadow-soft: none;
 }
+
+:root {
+  --color-text: light-dark(#363733,#e6e7e5);
+  --color-text-muted: light-dark(#73746e,#a0a49e);
+  --color-text-accent: light-dark(#5d625f,#bbc5bc);
+  --color-text-danger: var(--mantine-color-red-text);
+  --color-text-success: var(--mantine-color-green-text);
+  --color-text-attention: var(--mantine-color-yellow-text);
+  --color-bg: light-dark(#fdfdfc,#181b1a);
+  --color-bg-muted: light-dark(#f4f5f4,#222623);
+  --color-bg-accent-muted: light-dark(#e9ecea,#303a32);
+  --color-bg-accent-emphasis: light-dark(#777c78,#a5b1a7);
+  --color-border-default: light-dark(#dfe1df,#3b413c);
+  --color-border-muted: light-dark(#e9ebe9,#303630);
+  --color-border-accent-emphasis: var(--color-text-accent);
+  --color-control-hover: light-dark(#eef0ee,#2b302c);
+  --color-control-selected: var(--color-bg-accent-muted);
+  --z-index-dropdown: 200;
+}
+.mantine-ActionIcon-root {color:var(--color-text-muted)}
+.mantine-ActionIcon-root:not(:disabled):hover {background:var(--color-control-hover);color:var(--color-text)}
+.mantine-Menu-dropdown {background:var(--color-bg);border-color:var(--color-border-muted);color:var(--color-text)}
+.mantine-Menu-item {color:var(--color-text)}
+.mantine-Menu-item:not([data-disabled]):is(:hover,[data-hovered]) {background:var(--color-control-hover)}
+
+.lucide {stroke-width:1.75}
+
+.mantine-ActionIcon-root{transition:background-color var(--motion-fast),color var(--motion-fast)}
+.mantine-ActionIcon-root:active{transform:none}
+.mantine-Menu-dropdown{padding:4px;border-radius:var(--radius-surface);box-shadow:none}
+.mantine-Menu-item{min-height:36px;padding:8px;border-radius:var(--radius-control);font-size:var(--text-control);line-height:20px}
+.mantine-Menu-item[data-disabled]{opacity:.45}
+.mantine-Menu-itemIndicator{width:16px;height:16px;margin-inline-end:8px;color:var(--color-text-accent)}
+.mantine-Menu-itemIndicator .lucide{width:16px;height:16px;flex:none;fill:none}

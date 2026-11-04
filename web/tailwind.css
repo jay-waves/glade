@@ -1,13 +1,13 @@
 /* Shared UI dimensions and colors belong here; document typography stays in renderer CSS.
    Keep utility names literal for scanning, and pass dynamic values through inline styles.
    Toolbar container queries use reader width, not the overall window width. */
-/* Keep Primer and document defaults; deliberately omit Preflight. */
+/* Keep component and document defaults; deliberately omit Preflight. */
 @layer theme, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 @source "./";
 
-/* Utility names reuse the application aliases defined in primer.css. */
+/* Utility names reuse the application aliases defined in theme.css. */
 @theme inline {
   --color-fg: var(--color-text);
   --color-muted: var(--color-text-muted);
@@ -31,7 +31,7 @@
   --text-ui--line-height: 20px;
   --text-meta: 12px;
   --text-meta--line-height: 18px;
-  --radius-ui: 6px;
+  --radius-ui: var(--radius-control);
   --spacing-row: 32px;
   --spacing-toolbar: 40px;
   --spacing-sidebar-rail: calc(var(--spacing-toolbar) + 8px + 1px);

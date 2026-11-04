@@ -67,3 +67,38 @@ async fn ffmpeg_thumbnail_metadata_and_cache_invalidation() {
         800
     );
 }
+
+#[tokio::test]
+async fn video_metadata_includes_playback_details() {
+    let dir = tempdir().unwrap();
+    let cache = dir.path().join("cache");
+    fs::create_dir(&cache).unwrap();
+    let path = dir.path().join("video.mp4");
+    let output = tokio::process::Command::new("ffmpeg")
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=160x90:rate=24",
+            "-t",
+            "1",
+            "-c:v",
+            "mpeg4",
+        ])
+        .arg(&path)
+        .output()
+        .await
+        .unwrap();
+    assert!(output.status.success());
+    let details = glade::media::metadata(&path, &cache).await.unwrap();
+    assert_eq!(details["codec"], "mpeg4");
+    assert_eq!(details["frameRate"], 24.0);
+    assert!(details["durationSeconds"].as_f64().unwrap() > 0.0);
+    assert!(details["bitrate"].as_f64().unwrap() > 0.0);
+    assert_eq!(
+        glade::media::metadata(&path, &cache).await.unwrap(),
+        details
+    );
+}

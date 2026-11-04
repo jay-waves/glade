@@ -1,19 +1,27 @@
-import { renderPaths, renderFolders } from './main.jsx';
-import { galleryLayout, galleryRowLayout, galleryBatchSize } from './gallery/gallery-layout.mjs';
+import {gallerySettings} from './gallery-settings.mjs';
+import {resizeVideoSurface, mountNativeVideoFallback} from './video-surface.mjs';
+import {wrapMediaIndex, mediaNavigationDirection} from './media-navigation.mjs';
+import {bindPreviewControls} from './preview-controls.mjs';
+import { renderFolders } from './folder-tree-mount.jsx';
+import { galleryLayout, galleryRowLayout, galleryBatchSize, galleryUsesRows } from './gallery/gallery-layout.mjs';
 import { resizeGallery } from './gallery/gallery-zoom.mjs';
+import { preserveZoomAnchor } from './viewer-zoom.mjs';
+import { bindImagePan, previewFitScale } from './image-pan.mjs';
+import { mediaInfo } from './media-info.mjs';
+import { bindZoomInput } from './zoom-input.mjs';
 import { icon } from './icons.mjs';
 import { createGalleryPlaybackQueue } from './playback.mjs';
 
 const $ = id => document.getElementById(id);
 for (const element of document.querySelectorAll('[data-icon]')) element.append(icon(element.dataset.icon));
 const config = await request('/api/config');
-$('root-name').textContent = config.name;
-$('root-name').title = config.root;
 document.title = `${config.name} · glade`;
 const key = `glade:${config.root}`;
 let settings;
 try { settings = JSON.parse(localStorage.getItem(key)) ?? {}; } catch { settings = {}; }
 if (!settings || typeof settings !== 'object') settings = {};
+gallerySettings.update(settings);
+settings = gallerySettings.getSnapshot();
 let current = '', media = [], shown = 0, cards = [], generation = 0, aborter, frame, viewerIndex = -1;
 let scrollPositions = new Map(), restoring = false;
 const expanded = new Set(['']), treeCache = new Map(), dimensions = new Map();
@@ -21,15 +29,8 @@ let treeRender = 0, fileSelection = 0;
 const queue = createGalleryPlaybackQueue(8);
 const gallery = $('gallery'), viewport = $('viewport');
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-const controls = ['size', 'sort', 'recursive', 'hidden', 'autoplay'];
-for (const id of controls) {
-  if (settings[id] === undefined) continue;
-  if ($(id).type === 'checkbox') $(id).checked = Boolean(settings[id]);
-  else $(id).value = settings[id];
-}
-settings.rows = settings.rows === true;
 updateLayoutButtons();
-setTreeHidden(true);
+settings = gallerySettings.getSnapshot();
 
 async function request(url, signal) {
   const response = await fetch(url, { signal });
@@ -41,11 +42,10 @@ function query(endpoint, path, extra = {}) { return `${endpoint}?${new URLSearch
 function mediaUrl(path) { return query('/media', path); }
 function previewUrl(item) { return query('/thumbnail', item.path, { v: String(item.modified) }); }
 function save() {
-  for (const id of controls) settings[id] = $(id).type === 'checkbox' ? $(id).checked : $(id).value;
-  try { localStorage.setItem(key, JSON.stringify(settings)); } catch { /* Private browsing or full storage. */ }
+  try { localStorage.setItem(key, JSON.stringify(gallerySettings.preferences())); } catch { /* Private browsing or full storage. */ }
 }
 function message(text) { $('notice').textContent = text; }
-function list(path, recursive = false, signal) { return request(query('/api/list', path, { recursive: recursive ? '1' : '0', hidden: $('hidden').checked ? '1' : '0' }), signal); }
+function list(path, recursive = false, signal) { return request(query('/api/list', path, { recursive: recursive ? '1' : '0', hidden: settings.hidden ? '1' : '0' }), signal); }
 
 async function renderTree() {
   const token = ++treeRender;
@@ -56,7 +56,22 @@ async function renderTree() {
       if (token !== treeRender) return node;
       treeCache.set(node.path, listing);
     }
-    return { ...node, children: await Promise.all([...treeCache.get(node.path).directories, ...treeCache.get(node.path).media].map(branch)) };
+    const listing = treeCache.get(node.path);
+    const files = [...listing.media];
+    if (settings.sort.startsWith('taken-')) {
+      let cursor = 0;
+      await Promise.all(Array.from({ length: Math.min(4, files.length) }, async () => {
+        while (cursor < files.length && token === treeRender) {
+          const item = files[cursor++];
+          if (!dimensions.has(item.path)) {
+            try { dimensions.set(item.path, await request(query('/api/metadata', item.path))); }
+            catch { dimensions.set(item.path, {}); }
+          }
+        }
+      }));
+    }
+    files.sort(compareMedia);
+    return { ...node, children: await Promise.all([...listing.directories, ...files].map(branch)) };
   }
   const root = await branch({name:config.name,path:''});
   if (token !== treeRender) return;
@@ -65,7 +80,7 @@ async function renderTree() {
 async function openTreeFile(item) {
   const selection = ++fileSelection;
   const parent = item.path.includes('/') ? item.path.slice(0, item.path.lastIndexOf('/')) : '';
-  setTreeHidden(true);
+
   if (current !== parent || !media.some(entry => entry.path === item.path)) {
     history.replaceState(null, '', `#${encodeURIComponent(parent)}`);
     if (!await load(parent)) return;
@@ -74,48 +89,41 @@ async function openTreeFile(item) {
   const index = media.findIndex(entry => entry.path === item.path);
   if (index >= 0) { openViewer(index); renderTree().catch(error => message(error.message)); }
 }
-function breadcrumbs() {
-  const items = [{ name: config.name, path: '' }];
-  let accumulated = '';
-  for (const name of current.split('/').filter(Boolean)) { accumulated += `${accumulated ? '/' : ''}${name}`; items.push({ name, path: accumulated }); }
-  renderPaths(items, navigate);
-}
 function navigate(path) {
   ++fileSelection;
-  setTreeHidden(true);
+
   const hash = `#${encodeURIComponent(path)}`;
   if (location.hash === hash || (!path && !location.hash)) load(path);
   else location.hash = hash;
 }
-function sortMedia() {
-  const sort = $('sort').value;
-  media.sort((a, b) => {
-    const names = collator.compare(a.name, b.name) || collator.compare(a.path, b.path);
-    if (sort.startsWith('name-')) return sort === 'name-asc' ? names : -names;
-    const timestamp = item => sort.startsWith('taken-') ? (Date.parse(dimensions.get(item.path)?.capturedAt) || item.modified) : item.modified;
-    return (sort.endsWith('-asc') ? timestamp(a) - timestamp(b) : timestamp(b) - timestamp(a)) || names;
-  });
+function compareMedia(a, b) {
+  const sort = settings.sort;
+  const names = collator.compare(a.name, b.name) || collator.compare(a.path, b.path);
+  if (sort.startsWith('name-')) return sort === 'name-asc' ? names : -names;
+  const timestamp = item => sort.startsWith('taken-') ? (Date.parse(dimensions.get(item.path)?.capturedAt) || item.modified) : item.modified;
+  return (sort.endsWith('-asc') ? timestamp(a) - timestamp(b) : timestamp(b) - timestamp(a)) || names;
 }
+function sortMedia() { media.sort(compareMedia); }
 async function load(path) {
   scrollPositions.set(current, viewport.scrollTop);
   aborter?.abort(); aborter = new AbortController();
   const signal = aborter.signal, token = ++generation;
   current = path; viewerIndex = -1;
-  if ($('viewer').open) $('viewer').close();
+  closeViewer(false);
   for (const card of cards) card.cleanup();
   cards = []; shown = 0; media = []; gallery.replaceChildren(); gallery.style.height = '0px';
-  $('empty').hidden = false; $('empty').textContent = 'Loading folder…'; $('more').hidden = true; $('count').textContent = '';
+  $('empty').hidden = false; $('empty').textContent = 'Loading folder…'; $('more').hidden = true; $('sidebar-info').textContent = '';
   let prefix = ''; expanded.add('');
   for (const part of current.split('/').filter(Boolean)) { prefix += `${prefix ? '/' : ''}${part}`; expanded.add(prefix); }
-  breadcrumbs(); message('');
+  message('');
   try {
-    const result = await list(current, $('recursive').checked, signal);
+    const result = await list(current, settings.recursive, signal);
     if (token !== generation) return;
-    if (!$('recursive').checked) treeCache.set(current, result);
+    if (!settings.recursive) treeCache.set(current, result);
     media = result.media;
     renderTree().catch(error => { if (token === generation) message(`File browser: ${error.message}`); });
     if (token !== generation) return;
-    if ($('sort').value.startsWith('taken-')) {
+    if (settings.sort.startsWith('taken-')) {
       message('Reading capture dates…');
       let cursor = 0;
       await Promise.all(Array.from({ length: 4 }, async () => {
@@ -127,10 +135,11 @@ async function load(path) {
     }
     if (token !== generation) return;
     sortMedia();
+    renderTree().catch(error => { if (token === generation) message(`File browser: ${error.message}`); });
     const notices = [...result.warnings];
-    if ($('sort').value.startsWith('taken-')) notices.push('Files without capture dates are sorted by modification time.');
+    if (settings.sort.startsWith('taken-')) notices.push('Files without capture dates are sorted by modification time.');
     message(notices.join(' · '));
-    $('count').textContent = `${media.length.toLocaleString()} items`;
+    $('sidebar-info').textContent = `${media.length.toLocaleString()} items`;
     $('empty').hidden = media.length > 0;
     $('empty').textContent = 'No media in this folder.\nTry another folder or enable “Include subdirectories”.';
     viewport.scrollTop = 0;
@@ -149,7 +158,8 @@ async function load(path) {
 let layoutFrame;
 function scheduleLayout() { if (!layoutFrame) layoutFrame = requestAnimationFrame(() => { layoutFrame = undefined; placeCards(); }); }
 function placeCards() {
-  const result = (settings.rows ? galleryRowLayout : galleryLayout)(cards.map(card => card.ratio), gallery.clientWidth, Number($('size').value));
+  updateLayoutButtons();
+  const result = (galleryUsesRows(gallery.clientWidth, settings.rows) ? galleryRowLayout : galleryLayout)(cards.map(card => card.ratio), gallery.clientWidth, Number(settings.size));
   result.items.forEach((item, index) => Object.assign(cards[index].element.style, { left: `${item.left}px`, top: `${item.top}px`, width: `${item.width}px`, height: `${item.height}px` }));
   gallery.style.height = `${result.height}px`;
 }
@@ -186,7 +196,7 @@ function makeCard(item, index) {
     const release = () => { state.cancel?.(); state.cancel = undefined; suspend(); };
     video.onerror = () => { failed = true; release(); };
     state.updatePlayback = () => {
-      const wanted = !disposed && !document.hidden && !$('viewer').open && state.visible && (state.hovered || $('autoplay').checked);
+      const wanted = !disposed && !document.hidden && !$('viewer').open && state.visible && (state.hovered || settings.autoplay);
       if (!wanted || failed) { release(); return; }
       if (state.cancel) { state.cancel.setPriority(state.hovered); return; }
       state.cancel = queue.request(() => {
@@ -216,95 +226,278 @@ const moreObserver = new IntersectionObserver(entries => { if (entries.some(entr
 moreObserver.observe($('sentinel'));
 $('more').onclick = addBatch;
 
-function updateLayoutButtons() { $('masonry').setAttribute('aria-pressed', String(!settings.rows)); $('rows').setAttribute('aria-pressed', String(settings.rows)); }
-for (const name of ['masonry', 'rows']) $(name).onclick = () => { settings.rows = name === 'rows'; updateLayoutButtons(); save(); placeCards(); };
-$('size').oninput = () => { save(); placeCards(); };
+function updateLayoutButtons() {
+  const rows = galleryUsesRows(gallery.clientWidth, settings.rows);
+  gallerySettings.update({width:gallery.clientWidth});
+  const size = Number(settings.size), ratios = cards.map(card => card.ratio);
+  for (const [id, direction] of [['smaller', -1], ['larger', 1]]) {
+    $(id).disabled = resizeGallery(size, direction, false, gallery.clientWidth, rows, ratios) === size;
+  }
+}
+gallerySettings.subscribe((next, previous) => {
+  settings = next;
+  const changed = key => next[key] !== previous[key];
+  if (!['size','sort','rows','recursive','hidden','autoplay'].some(changed)) return;
+  save();
+  if (['recursive','hidden','sort'].some(changed)) {
+    ++fileSelection; ++treeRender;
+    if (changed('hidden')) treeCache.clear();
+    load(current);
+  } else if (changed('size') || changed('rows')) placeCards();
+  if (changed('autoplay')) for (const card of cards) card.updatePlayback();
+});
 for (const [id, direction] of [['smaller', -1], ['larger', 1]]) $(id).onclick = () => {
-  $('size').value = resizeGallery(Number($('size').value), direction, false, gallery.clientWidth, settings.rows, cards.map(card => card.ratio));
-  $('size').oninput();
+  gallerySettings.update({size:resizeGallery(settings.size, direction, false, gallery.clientWidth, galleryUsesRows(gallery.clientWidth, settings.rows), cards.map(card => card.ratio))});
 };
-for (const menu of document.querySelectorAll('details.options')) {
-  menu.addEventListener('toggle', () => {
-    if (menu.open) for (const other of document.querySelectorAll('details.options')) if (other !== menu) other.open = false;
-  });
+const sidebar = $('sidebar'), sidebarReveal = $('sidebar-reveal');
+let sidebarPinned = false, transferringPreviewFocus = false;
+function setSidebarOpen(open) {
+  if (!open && sidebarPinned) return;
+  document.querySelector('.app-shell').toggleAttribute('data-sidebar-open', open);
+  sidebarReveal.setAttribute('aria-expanded', String(open));
+  sidebar.inert = !open;
 }
-document.addEventListener('click', event => {
-  for (const menu of document.querySelectorAll('details.options[open]')) if (!menu.contains(event.target)) menu.open = false;
-});
-document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || $('viewer').open) return;
-  const menu = document.querySelector('details.options[open]');
-  if (menu) { menu.open = false; menu.querySelector('summary').focus(); }
-  else setTreeHidden(true);
-});
-for (const id of ['recursive', 'hidden', 'sort']) $(id).onchange = () => { ++fileSelection; ++treeRender; save(); if (id === 'hidden') treeCache.clear(); load(current); };
-$('autoplay').onchange = () => { save(); for (const card of cards) card.updatePlayback(); };
-$('refresh').onclick = () => { ++fileSelection; ++treeRender; treeCache.clear(); dimensions.clear(); load(current); };
-function setTreeHidden(hidden) {
-  const restoreFocus = hidden && $('sidebar').contains(document.activeElement);
-  document.body.classList.toggle('tree-hidden', hidden);
-  $('sidebar').hidden = hidden;
-  $('drawer-backdrop').hidden = hidden;
-  $('toggle-tree').setAttribute('aria-expanded', String(!hidden));
-  $('viewport').inert = !hidden;
-  if (restoreFocus) $('toggle-tree').focus();
-}
-$('toggle-tree').onclick = () => {
-  const hidden = !$('sidebar').hidden;
-  setTreeHidden(hidden);
-  if (!hidden) { $('close-tree').focus(); renderTree().catch(error => message(`File browser: ${error.message}`)); }
+setSidebarOpen(false);
+$('sidebar-pin').onclick = () => {
+  sidebarPinned = !sidebarPinned;
+  document.querySelector('.app-shell').toggleAttribute('data-sidebar-pinned', sidebarPinned);
+  $('sidebar-pin').setAttribute('aria-pressed', String(sidebarPinned));
+  $('sidebar-pin').setAttribute('aria-label', sidebarPinned ? 'Unpin file browser' : 'Pin file browser');
+  if (!sidebarPinned) { setSidebarOpen(false); sidebarReveal.focus(); }
 };
-$('close-tree').onclick = $('drawer-backdrop').onclick = () => setTreeHidden(true);
+sidebarReveal.onclick = () => {
+  const open = !document.querySelector('.app-shell').hasAttribute('data-sidebar-open');
+  setSidebarOpen(open);
+  if (open) sidebar.querySelector('button')?.focus();
+};
+document.addEventListener('pointerdown', event => {
+  if (!sidebar.contains(event.target) && event.target !== sidebarReveal && !event.target.closest('#glade-overlays')) setSidebarOpen(false);
+});
+document.addEventListener('focusin', event => {
+  if (transferringPreviewFocus) return;
+  if (!sidebar.contains(event.target) && event.target !== sidebarReveal && !event.target.closest('#glade-overlays')) setSidebarOpen(false);
+});
+const previewControls = bindPreviewControls($('viewer'), $('preview-controls'));
 document.addEventListener('visibilitychange', () => { for (const card of cards) card.updatePlayback(); });
-function clearViewer() { for (const video of $('viewer-content').querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); } $('viewer-content').replaceChildren(); }
+const cancelImagePan = bindImagePan($('viewer-content'));
+let unmountVideoPlayer;
+function clearViewer() { cancelImagePan(); $('viewer-content').classList.remove('can-pan'); for (const video of $('viewer-content').querySelectorAll('video')) { video.pause(); video.removeAttribute('src'); video.load(); } unmountVideoPlayer?.(); unmountVideoPlayer = undefined; $('viewer-content').replaceChildren(); }
+let viewerScale = 1, fitMode = true, viewerPointer;
+let viewerMetadata = {};
+function setPreviewMode(active) {
+  document.querySelector('.app-shell').toggleAttribute('data-preview', active);
+  $('gallery-controls').hidden = active;
+  const video = active && Boolean($('viewer-content').querySelector('.video-player-host'));
+  $('preview-controls').hidden = !active || video;
+  $('preview-controls').classList.toggle('native-video-navigation', active && !video && Boolean($('viewer-content').querySelector('video')));
+  previewControls.setActive(active && !video);
+  viewport.inert = active;
+  viewport.setAttribute('aria-hidden', String(active));
+}
+function closeViewer(restoreFocus = true) {
+  if (!$('viewer').open) return;
+  $('viewer').close();
+  clearViewer();
+  setPreviewMode(false);
+  $('sidebar-info').textContent = `${media.length.toLocaleString()} items`;
+  for (const card of cards) card.updatePlayback();
+  if (restoreFocus) {
+    (cards[viewerIndex]?.element ?? viewport).focus({ preventScroll: true });
+    renderTree().catch(error => message(error.message));
+  }
+}
+function refreshViewerInfo() {
+  const item = media[viewerIndex];
+  if (!item) return;
+  const info = mediaInfo(item, viewerMetadata);
+  $('sidebar-info').textContent = info.details;
+}
+$('viewer-content').addEventListener('pointermove', event => {
+  viewerPointer = { x: event.clientX, y: event.clientY };
+});
+$('viewer-content').addEventListener('pointerleave', () => { viewerPointer = undefined; });
+function updateViewerZoom() {
+  const content = $('viewer-content'), img = content.querySelector('img');
+  const host = content.querySelector('.video-player-host');
+  if (host) {
+    if (!resizeVideoSurface(host, content)) return;
+    content.scrollLeft = 0; content.scrollTop = 0;
+    return;
+  }
+  if (!img?.naturalWidth) return;
+  const style = getComputedStyle(content);
+  const width = content.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  const height = content.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  if (fitMode) viewerScale = previewFitScale(img.naturalWidth, img.naturalHeight, width, height);
+  img.style.width = `${img.naturalWidth * viewerScale}px`;
+  img.style.height = `${img.naturalHeight * viewerScale}px`;
+  if (fitMode) { content.scrollLeft = (content.scrollWidth - content.clientWidth) / 2; content.scrollTop = (content.scrollHeight - content.clientHeight) / 2; }
+  $('actual-view').textContent = `${Math.round(viewerScale * 100)}%`;
+  content.classList.toggle('can-pan', img.offsetWidth > content.clientWidth || img.offsetHeight > content.clientHeight);
+}
+function zoomViewer(direction, reset = false, point, scale) {
+  const content = $('viewer-content'), img = content.querySelector('img');
+  if (!img?.naturalWidth) return;
+  const resize = () => {
+    fitMode = reset;
+    if (!reset) viewerScale = scale ?? Math.min(8, Math.max(.05, viewerScale * 1.25 ** direction));
+    updateViewerZoom();
+  };
+  if (reset) {
+    resize();
+  } else preserveZoomAnchor(content, img, point, resize);
+}
+new ResizeObserver(() => { if ($('viewer').open) updateViewerZoom(); }).observe($('viewer-content'));
+bindZoomInput(document.querySelector('.app-shell'), {
+  isEnabled: () => $('viewer').open && Boolean($('viewer-content').querySelector('img')),
+  key: (direction, reset) => zoomViewer(direction, reset, viewerPointer),
+  wheel: event => {
+    if (!event.deltaY) return;
+    const point = $('viewer-content').contains(event.target) ? { x: event.clientX, y: event.clientY } : undefined;
+    zoomViewer(event.deltaY < 0 ? 1 : -1, false, point);
+  },
+});
+function updateViewerAtmosphere(image) {
+  // Sample a tiny canvas once per image; transparent pixels do not tint the backdrop.
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 24;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    context.drawImage(image, 0, 0, 24, 24);
+    const { data } = context.getImageData(0, 0, 24, 24);
+    let red = 0, green = 0, blue = 0, total = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const weight = data[i + 3] / 255;
+      red += data[i] * weight; green += data[i + 1] * weight; blue += data[i + 2] * weight; total += weight;
+    }
+    if (total) {
+      const channels = [red / total, green / total, blue / total];
+      const gray = channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
+      // Retain a muted hint of the image's hue, not its saturated highlights.
+      const muted = channels.map(channel => Math.round(gray + (channel - gray) * .25));
+      document.querySelector('.app-shell').style.setProperty('--ambient', `rgb(${muted.join(' ')})`);
+    }
+  } catch { /* Keep the neutral backdrop when a format cannot be sampled. */ }
+}
 function openViewer(index) {
-  if (index < 0 || index >= media.length) return;
-  viewerIndex = index; clearViewer();
+  index = wrapMediaIndex(index, media.length);
+  if (index === -1 || (index === viewerIndex && $('viewer').open)) return;
+  const sidebarFocus = sidebar.contains(document.activeElement) ? document.activeElement : null;
+  viewerIndex = index; viewerPointer = undefined; clearViewer();
+  document.querySelector('.app-shell').style.removeProperty('--ambient');
   const item = media[index];
-  $('viewer-content').classList.remove('actual-size');
-  $('viewer-name').textContent = item.name;
-  $('viewer-name').title = item.path;
-  $('viewer-details').textContent = `${item.kind === 'video' ? 'Video' : 'Image'} · ${new Intl.NumberFormat(undefined, {maximumFractionDigits: 1}).format(item.size / 1024 / 1024)} MB · ${item.path}`;
-  $('actual-view').disabled = $('fit-view').disabled = item.kind === 'video' || Boolean(item.liveVideo);
-  $('original').href = mediaUrl(item.path);
-  $('viewer-position').textContent = `${index + 1} / ${media.length}`;
-  $('previous').disabled = index === 0; $('next').disabled = index === media.length - 1;
+  fitMode = true; viewerScale = 1;
+  $('viewer-content').scrollTo(0, 0);
+  $('viewer').setAttribute('aria-label', `Preview ${item.name}`);
+  viewerMetadata = {}; refreshViewerInfo();
+  const isVideo = item.kind === 'video' || Boolean(item.liveVideo);
+  $('actual-view').setAttribute('aria-label', isVideo ? 'Reset video to fit' : 'View image at original size');
+  for (const [id, action, key] of [['zoom-in', 'Zoom in', '+'], ['zoom-out', 'Zoom out', '−']]) {
+    const label = isVideo ? action : `${action} (Ctrl ${key})`;
+    $(id).setAttribute('aria-label', label);
+  }
+  for (const id of ['zoom-in', 'zoom-out', 'actual-view']) { $(id).disabled = isVideo; $(id).hidden = isVideo; }
+  $('zoom-divider').hidden = isVideo;
+  $('actual-view').textContent = '—';
   let element;
   if (item.kind === 'video' || item.liveVideo) {
-    element = document.createElement('video'); element.controls = true; element.playsInline = true; element.preload = 'metadata';
-    element.src = mediaUrl(item.liveVideo ?? item.path);
-    if (item.liveVideo) element.poster = mediaUrl(item.path);
-    else element.poster = previewUrl(item);
-  } else { element = document.createElement('img'); element.alt = item.name; element.src = mediaUrl(item.path); }
+    element = document.createElement('div'); element.className = 'video-player-host';
+    const surface = document.createElement('div'); surface.className = 'video-zoom-surface'; element.append(surface);
+    const fallback = error => {
+      if (!element.isConnected || element.className !== 'video-player-host') return;
+      console.error('Unable to load the custom video player; using native controls.', error);
+      unmountVideoPlayer?.(); unmountVideoPlayer = undefined;
+      const onError = element.onerror;
+      element = mountNativeVideoFallback(element, {
+        src: mediaUrl(item.liveVideo ?? item.path),
+        poster: item.liveVideo ? mediaUrl(item.path) : previewUrl(item),
+        name: item.name, onError,
+      });
+      setPreviewMode(true);
+    };
+    import('./video/mount-player.jsx').then(({ mountVideoPlayer }) => {
+      if (!element.isConnected) return;
+      unmountVideoPlayer = mountVideoPlayer(surface, {
+        onFatalError: fallback,
+        src: mediaUrl(item.liveVideo ?? item.path),
+        poster: item.liveVideo ? mediaUrl(item.path) : previewUrl(item),
+        name: item.name,
+        onBack: () => closeViewer(),
+        onPrevious: () => openViewer(viewerIndex - 1),
+        onNext: () => openViewer(viewerIndex + 1),
+        onDimensions: (width, height) => {
+          if (element.isConnected && width && height) {
+            Object.assign(viewerMetadata, { width, height }); refreshViewerInfo(); updateViewerZoom();
+          }
+        },
+        onError: () => element.onerror(),
+      });
+    }).catch(fallback);
+  } else { element = document.createElement('img'); element.alt = item.name; element.draggable = false;
+    element.onload = () => {
+      if (!element.isConnected) return;
+      updateViewerZoom();
+      updateViewerAtmosphere(element);
+      Object.assign(viewerMetadata, { width: element.naturalWidth, height: element.naturalHeight }); refreshViewerInfo();
+    };
+    element.src = mediaUrl(item.path); }
   element.onerror = () => {
     if (!element.isConnected) return;
     if (item.kind === 'image' && !item.liveVideo && element.dataset.fallback !== '1') {
       element.dataset.fallback = '1'; element.src = previewUrl(item);
       const note = document.createElement('p'); note.textContent = 'This image format is not supported by your browser. Showing a converted preview.'; $('viewer-content').append(note); return;
     }
-    const note = document.createElement('p'); note.textContent = 'Your browser cannot display this format. Use Open original to open the file.'; $('viewer-content').append(note);
+    const note = document.createElement('p'); note.textContent = 'Your browser cannot display this format.'; $('viewer-content').append(note);
   };
   $('viewer-content').append(element);
-  if (!$('viewer').open) $('viewer').showModal();
+  updateViewerZoom();
+  Promise.all([request(query('/api/metadata', item.path)), item.liveVideo ? request(query('/api/metadata', item.liveVideo)) : Promise.resolve({})])
+    .then(([primary, live]) => {
+      if (!element.isConnected) return;
+      // Decoded dimensions remain authoritative (including browser EXIF rotation).
+      viewerMetadata = { ...primary, ...live, ...viewerMetadata };
+      refreshViewerInfo(); updateViewerZoom();
+    }).catch(() => { /* Size and decoded dimensions remain available. */ });
+  // Opening a dialog can move focus even before our explicit focus call.
+  // Keep a tree selection focused so previewing does not dismiss the sidebar.
+  transferringPreviewFocus = Boolean(sidebarFocus);
+  try {
+    if (!$('viewer').open) $('viewer').show();
+    setPreviewMode(true);
+    updateViewerZoom();
+    (sidebarFocus?.isConnected ? sidebarFocus : $('viewer-content')).focus({ preventScroll: true });
+  } finally { transferringPreviewFocus = false; }
+  renderTree().catch(error => message(error.message));
   for (const card of cards) card.updatePlayback();
 }
-$('actual-view').onclick = () => { $('viewer-content').classList.add('actual-size'); $('viewer-content').focus(); };
-$('fit-view').onclick = () => $('viewer-content').classList.remove('actual-size');
-$('viewer-content').ondblclick = event => { if (event.target.tagName === 'IMG') { $('viewer-content').classList.toggle('actual-size'); $('viewer-content').focus(); } };
-$('close').onclick = () => $('viewer').close();
-$('viewer').onclose = () => {
-  if ($('viewer').open) return;
-  clearViewer();
-  for (const card of cards) card.updatePlayback();
-  renderTree().catch(error => message(error.message));
+$('back-to-gallery').onclick = () => closeViewer();
+$('actual-view').onclick = () => zoomViewer(0, false, undefined, 1);
+$('zoom-in').onclick = () => zoomViewer(1);
+$('zoom-out').onclick = () => zoomViewer(-1);
+$('viewer-content').ondblclick = event => {
+  if (event.target.tagName !== 'IMG') return;
+  zoomViewer(0, !fitMode, { x: event.clientX, y: event.clientY }, 1);
 };
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[aria-expanded="true"][aria-haspopup]')) return;
+  if (!sidebarPinned && document.querySelector('.app-shell').hasAttribute('data-sidebar-open')) {
+    event.preventDefault(); setSidebarOpen(false); sidebarReveal.focus(); return;
+  }
+  if ($('viewer').open) {
+    event.preventDefault(); closeViewer();
+  }
+});
 $('previous').onclick = () => openViewer(viewerIndex - 1);
 $('next').onclick = () => openViewer(viewerIndex + 1);
 $('viewer').addEventListener('keydown', event => {
-  if (event.target.tagName === 'VIDEO' || $('viewer-content').classList.contains('actual-size')) return;
-  if (['ArrowLeft', 'ArrowUp'].includes(event.key)) { event.preventDefault(); openViewer(viewerIndex - 1); }
-  if (['ArrowRight', 'ArrowDown'].includes(event.key)) { event.preventDefault(); openViewer(viewerIndex + 1); }
+  if (event.target.closest('input, textarea, select, [contenteditable="true"], [role="menu"]')) return;
+  const direction = mediaNavigationDirection(event);
+  if (!direction) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openViewer(viewerIndex + direction);
 });
+
 function loadHash() { ++fileSelection; try { load(decodeURIComponent(location.hash.slice(1))); } catch { navigate(''); } }
 window.addEventListener('hashchange', loadHash);
 loadHash();

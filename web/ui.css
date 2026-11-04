@@ -1,7 +1,7 @@
 @reference "./tailwind.css";
 
 /* Native application controls share a baseline. Utilities remain available for
-   local layout; renderer typography and Primer adapters stay outside this layer. */
+   local layout; renderer typography and component adapters stay outside this layer. */
 @layer components {
   :where(.ui-button, .ui-icon-button, .ui-row-button, .ui-disclosure, .ui-text-button) {
     @apply cursor-pointer border-0 bg-transparent font-ui text-ui;
@@ -39,6 +39,6 @@
   .ui-empty :is(code, kbd) { @apply rounded border border-solid border-divider bg-subtle px-[5px] py-0.5 text-meta text-fg; }
 }
 
-/* Primer's typography needs one explicit adapter, rather than per-tag utilities. */
+/* Breadcrumb typography follows the compact toolbar. */
 .path-bar :where(a, button, span) { font-size: var(--text-ui) !important; }
 .path-bar [aria-current="page"] { color: var(--color-text); font-weight: 600; }

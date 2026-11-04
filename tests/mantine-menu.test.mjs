@@ -1,0 +1,54 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {JSDOM} from 'jsdom';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {resolve} from 'node:path';
+
+test('Mantine menus update shared settings and mount in the sidebar portal and close with Escape',async()=>{
+ const dom=new JSDOM('<div id="root"></div><div id="glade-overlays"></div>',{url:'http://localhost',pretendToBeVisual:true});
+ for(const key of ['window','document','HTMLElement','Element','Node','getComputedStyle']) globalThis[key]=key==='getComputedStyle'?dom.window.getComputedStyle.bind(dom.window):dom.window[key];
+ globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+ globalThis.requestAnimationFrame=window.requestAnimationFrame.bind(window);
+ globalThis.cancelAnimationFrame=window.cancelAnimationFrame.bind(window);
+ window.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+ globalThis.ResizeObserver=class{observe(){} unobserve(){} disconnect(){}};
+ const dir=await mkdtemp(resolve('node_modules/.glade-menu-'));
+ try {
+ const result=await build({stdin:{contents:"export {GalleryMenus} from './web/gallery-menus.jsx'; export {gallerySettings} from './web/gallery-settings.mjs';",resolveDir:process.cwd(),loader:'jsx'},bundle:true,packages:'external',platform:'node',format:'esm',write:false,jsx:'automatic'});
+ await writeFile(dir+'/menu.mjs',result.outputFiles[0].text);
+ const {GalleryMenus,gallerySettings}=await import(dir+'/menu.mjs');
+ const React=await import('react');
+ const {createRoot}=await import('react-dom/client');
+ const {MantineProvider}=await import('@mantine/core');
+ const root=createRoot(document.getElementById('root'));
+ globalThis.Event=window.Event;
+ await React.act(async()=>root.render(React.createElement(MantineProvider,{},React.createElement(GalleryMenus,{overlayRoot:document.getElementById('glade-overlays')}))));
+ const click=async el=>{await React.act(async()=>el.dispatchEvent(new window.MouseEvent('click',{bubbles:true})));await React.act(async()=>new Promise(resolve=>setTimeout(resolve,200)));};
+ let changed=0;
+ gallerySettings.subscribe(()=>changed++);
+ await click(document.querySelector('[aria-label="Sort"]'));
+ await React.act(async()=>new Promise(resolve=>setTimeout(resolve,250)));
+ assert.ok(document.querySelector('#glade-overlays [role="menu"]'));
+ assert.equal(document.querySelector('#glade-overlays [role="menu"]').getAttribute('data-position'),'bottom-start');
+ const selectedIcon=document.querySelector('[role="menuitemradio"][aria-checked="true"] svg');
+ assert.ok(selectedIcon.classList.contains('lucide-check'));
+ assert.equal(selectedIcon.getAttribute('stroke-width'),'1.75');
+ assert.equal(selectedIcon.getAttribute('fill'),'none');
+ const descending=[...document.querySelectorAll('[role="menuitemradio"]')].find(el=>el.textContent==='Name Z–A');
+ await click(descending);
+ assert.equal(gallerySettings.getSnapshot().sort,'name-desc');
+ assert.equal(changed,1);
+ await click(document.querySelector('[aria-label="Gallery options"]'));
+ const recursive=[...document.querySelectorAll('[role="menuitemcheckbox"]')].find(el=>el.textContent==='Include subdirectories');
+ await click(recursive);
+ assert.equal(gallerySettings.getSnapshot().recursive,true);
+ await click(document.querySelector('[aria-label="Gallery options"]'));
+ const menu=document.querySelector('#glade-overlays [role="menu"]');
+ assert.equal(menu.getAttribute('data-position'),'bottom-start');
+ assert.ok(menu.querySelector('[role="menuitemcheckbox"][aria-checked="true"] .lucide-check'));
+ await React.act(async()=>menu.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',code:'Escape',bubbles:true})));
+ assert.equal(document.querySelector('[aria-label="Gallery options"]').getAttribute('aria-expanded'),'false');
+ await React.act(async()=>root.unmount());
+ } finally {await rm(dir,{recursive:true,force:true});dom.window.close();}
+});

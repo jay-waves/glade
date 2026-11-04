@@ -2,7 +2,11 @@ import { computeRowsLayout } from 'react-photo-album';
 
 const gap = 12;
 export const galleryBatchSize = 64;
-export const galleryColumns = (width, size) => Math.max(1, Math.floor((width + gap) / (size + gap)));
+export const galleryUsesRows = (width, rows) => Boolean(rows && width > 700);
+export const galleryColumns = (width, size) => {
+  const count = Math.max(1, Math.floor((width + gap) / (size + gap)));
+  return width <= 700 ? Math.min(2, count) : count;
+};
 /**
  * @template {import('react-photo-album').Photo} TPhoto
  * @param {readonly TPhoto[]} photos
@@ -46,9 +50,7 @@ export function galleryLayout(ratios, availableWidth, size) {
     // keeps all existing placements while balancing the remaining columns.
     const column = heights.indexOf(Math.min(...heights));
     const naturalHeight = Math.max(0, cardWidth - 2) / ratio;
-    // With one column the viewport fixes the card width, so scale its media box
-    // to keep the size control meaningful instead of producing inert stops.
-    const height = (count === 1 ? naturalHeight * size / 200 : naturalHeight) + 2;
+    const height = naturalHeight + 2;
     const item = { left: column * (cardWidth + gap), top: heights[column], width: cardWidth, height };
     heights[column] += height + gap;
     return item;
